@@ -38,7 +38,8 @@ cli
       throw new Error('Orientation must be portrait or landscape');
     }
 
-    if (!flags.prompt) {
+    // Only require prompt if not in login-only mode
+    if (!flags.loginOnly && !flags.prompt) {
       throw new Error('--prompt is required');
     }
 
@@ -47,15 +48,23 @@ cli
     const profileStore = new MongoProfileStore({
       mongoUri: runtimeConfig.MONGODB_URI,
       databaseName: runtimeConfig.MONGODB_DATABASE,
-      profileRoot: runtimeConfig.PROFILE_ROOT
+      profileRoot: runtimeConfig.PROFILE_ROOT,
+      machineId: runtimeConfig.MACHINE_ID
     });
 
     await profileStore.connect();
     const profile = await profileStore.ensureProfile(profileName);
 
+    // Log proxy từ DB để verify
+    logger.info({ 
+      profileName: profile.name,
+      proxy: profile.proxy || '(empty - no proxy)',
+      hasProxy: !!profile.proxy && profile.proxy.trim().length > 0
+    }, 'Profile loaded from MongoDB');
+
     const { context, page, artifactsDir } = await launchBrowser({
       userDataDir: profile.userDataDir,
-      proxy: profile.proxy,
+      proxy: profile.proxy, // Proxy từ MongoDB
       fingerprint: profile.fingerprint,
       onFingerprintPersist: async (fingerprint) => {
         await profileStore.setFingerprint(profile.name, fingerprint);
@@ -86,7 +95,7 @@ cli
       }
 
       const input: GenerationInput = {
-        prompt: flags.prompt,
+        prompt: flags.prompt || 'test', // Default prompt if login-only mode
         durationSeconds: duration as 10 | 15,
         orientation
       };

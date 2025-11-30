@@ -9,6 +9,7 @@ export interface ProfileRecord {
   proxy: string;
   userDataDir: string;
   fingerprint: string | null;
+  machineId: string; // Machine identifier - profiles are machine-specific
   status: 'active' | 'blocked' | 'low_credit' | 'disabled';
   creditRemaining: number | null;
   dailyRunCount: number;
@@ -28,6 +29,7 @@ interface MongoProfileStoreOptions {
   mongoUri: string;
   databaseName: string;
   profileRoot: string;
+  machineId: string; // Machine identifier for this store instance
 }
 
 export class MongoProfileStore {
@@ -82,15 +84,34 @@ export class MongoProfileStore {
   }
 
   async getProfile(name: string): Promise<ProfileRecord | null> {
-    return await this.profilesCollection.findOne({ name });
+    // Only get profile if it belongs to this machine
+    return await this.profilesCollection.findOne({ 
+      name,
+      machineId: this.options.machineId 
+    });
   }
 
   async ensureProfile(name: string): Promise<ProfileRecord> {
-    const existing = await this.getProfile(name);
+    // Check if profile exists for this machine
+    const existing = await this.profilesCollection.findOne({ 
+      name,
+      machineId: this.options.machineId 
+    });
+    
     if (existing) {
       return existing;
     }
 
+    // Check if profile exists but belongs to another machine
+    const existingOtherMachine = await this.profilesCollection.findOne({ name });
+    if (existingOtherMachine && existingOtherMachine.machineId !== this.options.machineId) {
+      throw new Error(
+        `Profile "${name}" already exists but belongs to machine "${existingOtherMachine.machineId}". ` +
+        `Current machine is "${this.options.machineId}". Profiles are machine-specific.`
+      );
+    }
+
+    // Find available proxy (not assigned to any profile)
     const available = await this.proxiesCollection.findOne(
       { assignedProfile: null },
       { sort: { addedAt: 1 } }
@@ -109,6 +130,7 @@ export class MongoProfileStore {
       proxy: available.proxy,
       userDataDir,
       fingerprint: null,
+      machineId: this.options.machineId, // Assign to current machine
       status: 'active',
       creditRemaining: null,
       dailyRunCount: 0,
@@ -119,19 +141,20 @@ export class MongoProfileStore {
     };
 
     await this.profilesCollection.insertOne(record);
+    // Mark proxy as assigned to this profile (1 proxy = 1 profile rule)
     await this.proxiesCollection.updateOne(
       { proxy: available.proxy },
       { $set: { assignedProfile: name } }
     );
 
-    logger.info({ name, proxy: available.proxy, userDataDir }, 'Created new profile entry');
+    logger.info({ name, proxy: available.proxy, machineId: this.options.machineId, userDataDir }, 'Created new profile entry');
     return record;
   }
 
   async setFingerprint(name: string, fingerprint: string): Promise<void> {
     const updatedAt = new Date().toISOString();
     await this.profilesCollection.updateOne(
-      { name },
+      { name, machineId: this.options.machineId }, // Only update profiles for this machine
       { $set: { fingerprint, updatedAt } }
     );
   }
@@ -142,7 +165,7 @@ export class MongoProfileStore {
     const status = creditRemaining >= 5 ? 'active' : 'low_credit';
 
     await this.profilesCollection.updateOne(
-      { name },
+      { name, machineId: this.options.machineId }, // Only update profiles for this machine
       {
         $set: {
           creditRemaining,
@@ -159,7 +182,7 @@ export class MongoProfileStore {
     const lastRunAt = new Date().toISOString();
 
     await this.profilesCollection.updateOne(
-      { name },
+      { name, machineId: this.options.machineId }, // Only update profiles for this machine
       {
         $set: { lastRunAt, updatedAt },
         $inc: { dailyRunCount: 1 }
@@ -168,17 +191,19 @@ export class MongoProfileStore {
   }
 
   async resetDailyCounts(): Promise<void> {
+    // Only reset counts for profiles on this machine
     await this.profilesCollection.updateMany(
-      {},
+      { machineId: this.options.machineId },
       { $set: { dailyRunCount: 0 } }
     );
-    logger.info('Reset daily run counts for all profiles');
+    logger.info({ machineId: this.options.machineId }, 'Reset daily run counts for profiles on this machine');
   }
 
   async findAvailableProfile(): Promise<ProfileRecord | null> {
-    // Find active profiles with credit >= 5, ordered by lastRunAt (ascending - least used first)
+    // Find active profiles with credit >= 5 for THIS MACHINE, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       {
+        machineId: this.options.machineId, // Only profiles for this machine
         status: 'active',
         $or: [
           { creditRemaining: { $gte: 5 } },
@@ -194,7 +219,10 @@ export class MongoProfileStore {
   }
 
   async getAllProfiles(): Promise<ProfileRecord[]> {
-    return await this.profilesCollection.find({}).toArray();
+    // Only get profiles that belong to this machine
+    return await this.profilesCollection.find({ 
+      machineId: this.options.machineId 
+    }).toArray();
   }
 }
 

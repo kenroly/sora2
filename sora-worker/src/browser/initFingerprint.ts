@@ -6,10 +6,21 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // CRITICAL: Load .env FIRST before reading FINGERPRINT_WORKDIR
-// Load from project root (parent of services/)
-loadEnv({ path: resolve(process.cwd(), '../../.env') });
-// Also try current directory
-loadEnv({ path: resolve(process.cwd(), '.env') });
+// Load from project root
+const envPaths = [
+  resolve(process.cwd(), '../.env'),      // Parent directory (most likely)
+  resolve(process.cwd(), '../../.env'),   // Old structure fallback
+  resolve(process.cwd(), '.env')          // Current directory fallback
+];
+
+let loaded = false;
+for (const envPath of envPaths) {
+  const result = loadEnv({ path: envPath });
+  if (!result.error) {
+    loaded = true;
+    break;
+  }
+}
 
 // Get the directory where this file is located (sora-worker/src/browser)
 const __filename = fileURLToPath(import.meta.url);
