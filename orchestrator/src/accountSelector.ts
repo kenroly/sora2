@@ -38,6 +38,29 @@ export class AccountSelector {
   }
 
   async selectAvailableProfile(): Promise<ProfileRecord | null> {
+    // First, get all profiles in database to log them
+    const allProfiles = await this.profilesCollection.find({}).toArray();
+    const allProfilesForMachine = allProfiles.filter(p => p.machineId === runtimeConfig.MACHINE_ID);
+    
+    logger.info({ 
+      machineId: runtimeConfig.MACHINE_ID,
+      totalProfilesInDb: allProfiles.length,
+      profilesForThisMachineCount: allProfilesForMachine.length,
+      allProfiles: allProfiles.map(p => ({
+        name: p.name,
+        machineId: p.machineId,
+        status: p.status,
+        creditRemaining: p.creditRemaining,
+        lastRunAt: p.lastRunAt
+      })),
+      profilesForThisMachine: allProfilesForMachine.map(p => ({
+        name: p.name,
+        status: p.status,
+        creditRemaining: p.creditRemaining,
+        lastRunAt: p.lastRunAt
+      }))
+    }, 'Profile status check');
+
     // Find active profiles with credit >= 5 FOR THIS MACHINE, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       {
@@ -57,10 +80,29 @@ export class AccountSelector {
       logger.info({ 
         profileName: profile.name, 
         creditRemaining: profile.creditRemaining,
-        machineId: profile.machineId 
+        machineId: profile.machineId,
+        lastRunAt: profile.lastRunAt
       }, 'Selected profile');
     } else {
-      logger.warn({ machineId: runtimeConfig.MACHINE_ID }, 'No available profiles found for this machine');
+      // Log detailed reason why no profile is available
+      const inactiveProfiles = allProfilesForMachine.filter(p => p.status !== 'active');
+      const lowCreditProfiles = allProfilesForMachine.filter(
+        p => p.status === 'active' && p.creditRemaining !== null && p.creditRemaining < 5
+      );
+      
+      logger.warn({ 
+        machineId: runtimeConfig.MACHINE_ID,
+        totalProfiles: allProfilesForMachine.length,
+        inactiveProfiles: inactiveProfiles.map(p => ({ name: p.name, status: p.status })),
+        lowCreditProfiles: lowCreditProfiles.map(p => ({ name: p.name, creditRemaining: p.creditRemaining })),
+        reason: allProfilesForMachine.length === 0 
+          ? 'No profiles found for this machine' 
+          : inactiveProfiles.length > 0 
+            ? `All ${inactiveProfiles.length} profile(s) are inactive` 
+            : lowCreditProfiles.length > 0
+              ? `All ${lowCreditProfiles.length} profile(s) have low credit (< 5)`
+              : 'Unknown reason'
+      }, 'No available profiles found for this machine');
     }
 
     return profile;
