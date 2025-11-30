@@ -2,8 +2,26 @@ import { config as loadEnv } from 'dotenv';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
-loadEnv({ path: resolve(process.cwd(), '../../.env') });
-loadEnv({ path: resolve(process.cwd(), '.env') });
+// Load .env from project root
+const envPaths = [
+  resolve(process.cwd(), '../.env'),      // Parent directory (most likely)
+  resolve(process.cwd(), '../../.env'),   // Old structure fallback
+  resolve(process.cwd(), '.env')          // Current directory fallback
+];
+
+let loaded = false;
+for (const envPath of envPaths) {
+  const result = loadEnv({ path: envPath });
+  if (!result.error) {
+    console.log(`[config] Loaded .env from: ${envPath}`);
+    loaded = true;
+    break;
+  }
+}
+
+if (!loaded) {
+  console.warn(`[config] Could not load .env. Tried paths:`, envPaths);
+}
 
 const schema = z.object({
   PORT: z.coerce.number().default(4100),

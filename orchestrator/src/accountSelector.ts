@@ -7,6 +7,7 @@ export interface ProfileRecord {
   proxy: string;
   userDataDir: string;
   fingerprint: string | null;
+  machineId: string; // Machine identifier - profiles are machine-specific
   status: 'active' | 'blocked' | 'low_credit' | 'disabled';
   creditRemaining: number | null;
   dailyRunCount: number;
@@ -37,9 +38,10 @@ export class AccountSelector {
   }
 
   async selectAvailableProfile(): Promise<ProfileRecord | null> {
-    // Find active profiles with credit >= 5, ordered by lastRunAt (ascending - least used first)
+    // Find active profiles with credit >= 5 FOR THIS MACHINE, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       {
+        machineId: runtimeConfig.MACHINE_ID, // Only profiles for this machine
         status: 'active',
         $or: [
           { creditRemaining: { $gte: 5 } },
@@ -52,9 +54,13 @@ export class AccountSelector {
     );
 
     if (profile) {
-      logger.info({ profileName: profile.name, creditRemaining: profile.creditRemaining }, 'Selected profile');
+      logger.info({ 
+        profileName: profile.name, 
+        creditRemaining: profile.creditRemaining,
+        machineId: profile.machineId 
+      }, 'Selected profile');
     } else {
-      logger.warn('No available profiles found');
+      logger.warn({ machineId: runtimeConfig.MACHINE_ID }, 'No available profiles found for this machine');
     }
 
     return profile;

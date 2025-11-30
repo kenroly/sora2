@@ -64,7 +64,8 @@ async function updateAllCredits(): Promise<void> {
   const profileStore = new MongoProfileStore({
     mongoUri: runtimeConfig.MONGODB_URI,
     databaseName: runtimeConfig.MONGODB_DATABASE,
-    profileRoot: runtimeConfig.PROFILE_ROOT
+    profileRoot: runtimeConfig.PROFILE_ROOT,
+    machineId: runtimeConfig.MACHINE_ID
   });
 
   await profileStore.connect();

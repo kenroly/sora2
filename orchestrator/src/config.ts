@@ -2,10 +2,26 @@ import { config as loadEnv } from 'dotenv';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
-// Load .env from project root (parent of services/)
-loadEnv({ path: resolve(process.cwd(), '../../.env') });
-// Also try current directory
-loadEnv({ path: resolve(process.cwd(), '.env') });
+// Load .env from project root
+const envPaths = [
+  resolve(process.cwd(), '../.env'),      // Parent directory (most likely)
+  resolve(process.cwd(), '../../.env'),   // Old structure fallback
+  resolve(process.cwd(), '.env')          // Current directory fallback
+];
+
+let loaded = false;
+for (const envPath of envPaths) {
+  const result = loadEnv({ path: envPath });
+  if (!result.error) {
+    console.log(`[config] Loaded .env from: ${envPath}`);
+    loaded = true;
+    break;
+  }
+}
+
+if (!loaded) {
+  console.warn(`[config] Could not load .env. Tried paths:`, envPaths);
+}
 
 const schema = z.object({
   API_BASE_URL: z.string().url().default('https://media.furtalk.net/api/v1/tool'),
@@ -13,6 +29,7 @@ const schema = z.object({
   PRODUCT_CODE: z.string().default('sora-2-with-watermark'),
   MONGODB_URI: z.string().min(1, 'MongoDB URI is required'),
   MONGODB_DATABASE: z.string().min(1).default('sora'),
+  MACHINE_ID: z.string().min(1, 'MACHINE_ID is required to identify which machine this orchestrator runs on'),
   PROFILE_ROOT: z.string().min(1).default('profiles'),
   FINGERPRINT_DIR_HOST: z.string().optional(),
   FINGERPRINT_WORKDIR: z.string().optional(),
@@ -34,6 +51,7 @@ export const runtimeConfig: RuntimeConfig = schema.parse({
   PRODUCT_CODE: process.env.PRODUCT_CODE,
   MONGODB_URI: process.env.MONGODB_URI,
   MONGODB_DATABASE: process.env.MONGODB_DATABASE,
+  MACHINE_ID: process.env.MACHINE_ID,
   PROFILE_ROOT: process.env.PROFILE_ROOT,
   FINGERPRINT_DIR_HOST: process.env.FINGERPRINT_DIR_HOST ?? resolve(process.cwd(), '../sora-worker/.fingerprint-engine'),
   FINGERPRINT_WORKDIR: process.env.FINGERPRINT_WORKDIR,

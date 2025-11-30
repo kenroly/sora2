@@ -87,6 +87,13 @@ npm run build
 
 ```powershell
 cd sora-worker
+npm start -- --profile acc01 --manual-login --login-only
+```
+
+Hoặc nếu muốn chỉ định đầy đủ các tham số:
+
+```powershell
+cd sora-worker
 npm start -- --profile acc01 --prompt "test" --duration 10 --orientation portrait --manual-login --login-only
 ```
 
@@ -136,9 +143,10 @@ Hoặc setup Windows Task Scheduler để chạy định kỳ.
 ```typescript
 {
   name: string;                    // Profile name (e.g., "acc01")
-  proxy: string;                   // HTTP proxy URL
+  proxy: string;                   // HTTP proxy URL (1 proxy = 1 profile, không dùng chung)
   userDataDir: string;             // Path to profile directory
   fingerprint: string | null;       // Bablosoft fingerprint ID
+  machineId: string;                // Machine identifier - profile thuộc máy nào
   status: 'active' | 'blocked' | 'low_credit' | 'disabled';
   creditRemaining: number | null;  // Sora credits remaining
   dailyRunCount: number;           // Number of runs today
@@ -148,6 +156,11 @@ Hoặc setup Windows Task Scheduler để chạy định kỳ.
   updatedAt: string;
 }
 ```
+
+**Lưu ý:**
+- Mỗi profile chỉ dùng 1 proxy duy nhất, proxy đó không được dùng cho profile khác
+- Mỗi profile thuộc về 1 máy cụ thể (theo `machineId`)
+- Orchestrator chỉ chọn profiles thuộc máy của nó (theo `MACHINE_ID` trong `.env`)
 
 ### Collection: `proxies`
 
@@ -164,6 +177,7 @@ Hoặc setup Windows Task Scheduler để chạy định kỳ.
 Tất cả services đọc `.env` ở project root:
 
 - `MONGODB_URI`, `MONGODB_DATABASE`
+- `MACHINE_ID`: **BẮT BUỘC** - định danh máy (ví dụ: `machine-01`, `pc-01`, `server-1`). Mỗi máy phải có ID riêng để phân biệt profiles
 - `API_KEY` hoặc `TOOL_API_KEY`
 - `BABLOSOFT_API_KEY`
 - `PROFILE_ROOT`: đường dẫn tuyệt đối tới thư mục profiles (ví dụ `C:\sora2\profiles`)
@@ -172,6 +186,12 @@ Tất cả services đọc `.env` ở project root:
 - `MONITOR_GATEWAY_URL`, `MONITOR_GATEWAY_TOKEN`, `MONITOR_CAPTURE_INTERVAL_MS`
 - `MONITOR_GATEWAY_PORT`, `MONITOR_GATEWAY_HOST`, `MONITOR_ARTIFACTS_DIR`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (optional)
+
+**Lưu ý về MACHINE_ID:**
+- Mỗi máy phải có `MACHINE_ID` riêng trong `.env`
+- Profiles được gán cho máy cụ thể, không thể dùng profile của máy khác
+- Khi setup profile mới, nó sẽ tự động gán cho máy hiện tại (theo `MACHINE_ID`)
+- Orchestrator chỉ chọn profiles thuộc máy của nó
 
 ## Troubleshooting
 
