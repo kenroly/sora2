@@ -1,0 +1,4 @@
+node_modules
+.fingerprint-engine
+.env
+profiles

@@ -1,0 +1,26 @@
+{
+  "name": "browser-manager",
+  "version": "0.1.0",
+  "description": "Desktop application to manage browser instances",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "pino": "^9.3.2"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.0",
+    "@types/node": "^22.9.0",
+    "pino-pretty": "^11.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
+
+
+

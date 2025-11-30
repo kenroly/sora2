@@ -1,0 +1,13 @@
+{
+  "name": "migration-scripts",
+  "type": "module",
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.5",
+    "mongodb": "^6.3.0",
+    "tsx": "^4.19.2",
+    "zod": "^3.23.8"
+  }
+}
+
+

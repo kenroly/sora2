@@ -1,0 +1,22 @@
+[
+  {
+    "index": 5,
+    "text": "",
+    "ariaLabel": "",
+    "dataTestId": "",
+    "className": "items-center justify-center rounded-full bg-[rgba(37,37,37,0.7)] shadow-[inset_0_0_1px_rgba(0,0,0,0.10),inset_0_0_1px_rgba(255,255,255,0.50),0_2px_20px_rgba(0,0,0,0.25)] backdrop-blur absolute right-5 top-5 p-2.5 tablet:right-1.5 tablet:top-1.5 tablet:p-1.5 hidden group-hover:flex",
+    "visible": false,
+    "position": null,
+    "isBottomLeft": false
+  },
+  {
+    "index": 7,
+    "text": "",
+    "ariaLabel": "",
+    "dataTestId": "",
+    "className": "contents",
+    "visible": false,
+    "position": null,
+    "isBottomLeft": false
+  }
+]
