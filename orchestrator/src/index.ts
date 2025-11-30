@@ -40,7 +40,17 @@ async function processTask(): Promise<void> {
   await taskStore.connect();
 
   try {
-    // Claim a task
+    // Check for available profile first before claiming a task
+    const profile = await accountSelector.selectAvailableProfile();
+    
+    if (!profile) {
+      logger.warn('No available profiles, skipping task claim');
+      return;
+    }
+
+    logger.info({ profile: profile.name }, 'Profile available, claiming task');
+
+    // Claim a task only when we have an available profile
     const task = await taskClient.claimTask(runtimeConfig.PRODUCT_CODE);
     
     if (!task) {
@@ -51,21 +61,7 @@ async function processTask(): Promise<void> {
     // Save task to database
     await taskStore.saveTask(task, runtimeConfig.PRODUCT_CODE);
 
-    logger.info({ taskId: task.id, prompt: task.prompt }, 'Processing task');
-
-    // Select an available profile
-    const profile = await accountSelector.selectAvailableProfile();
-    
-    if (!profile) {
-      logger.error({ taskId: task.id }, 'No available profiles, reporting task as failed');
-      await taskStore.updateTaskStatus(task.id, 'failed', {
-        error: 'No available profiles with sufficient credits'
-      });
-      await taskStore.incrementDailyStats('failed');
-      await taskClient.reportTask(task.id, 'No available profiles with sufficient credits');
-      await sendErrorNotification(task.id, 'No available profiles with sufficient credits');
-      return;
-    }
+    logger.info({ taskId: task.id, prompt: task.prompt, profile: profile.name }, 'Processing task');
 
     // Update task with profile
     await taskStore.updateTaskStatus(task.id, 'processing', {
