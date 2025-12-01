@@ -187,8 +187,14 @@ class Orchestrator {
         });
         await this.taskStore.incrementDailyStats('failed');
 
-        logger.error({ taskId, error: errorMessage, status }, 'Task failed');
-        await this.taskClient.reportTask(taskId, errorMessage);
+        logger.error({ taskId, error: errorMessage, status }, 'Task failed, resetting for retry');
+        // Reset task instead of reporting to allow retry
+        const reset = await this.taskClient.resetTask(taskId);
+        if (reset) {
+          logger.info({ taskId }, 'Task reset successfully, will be retried');
+        } else {
+          logger.warn({ taskId }, 'Failed to reset task');
+        }
         await sendErrorNotification(taskId, errorMessage, activeWorker.profile.name);
       }
     } catch (error) {
