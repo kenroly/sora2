@@ -229,6 +229,11 @@ class Orchestrator {
 
     // Start worker immediately (non-blocking)
     await this.startWorker(task, profile);
+    
+    // Sleep 30s after starting browser before claiming next task
+    logger.info({ profile: profile.name, taskId: task.id }, 'Worker started, sleeping 30s before next task');
+    await new Promise((resolve) => setTimeout(resolve, 30_000));
+    
     return true;
   }
 
@@ -255,7 +260,7 @@ async function main(): Promise<void> {
   orchestratorInstance = orchestrator;
   await orchestrator.initialize();
 
-  const pollInterval = 10 * 1000; // 10 seconds as requested
+  const pollInterval = 30 * 1000; // 30 seconds between task polls
 
   // Monitor loop - check active workers every 5 seconds
   const monitorInterval = setInterval(() => {
@@ -274,7 +279,7 @@ async function main(): Promise<void> {
         await sendErrorNotification('unknown', error instanceof Error ? error.message : String(error));
       }
 
-      // Wait 10 seconds before next poll
+      // Wait before next poll
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
   } finally {

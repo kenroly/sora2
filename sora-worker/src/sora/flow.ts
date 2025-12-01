@@ -83,11 +83,36 @@ async function detectLoggedIn(page: Page): Promise<boolean> {
   );
 }
 
+async function gotoWithRetry(
+  page: Page,
+  url: string,
+  options: { waitUntil?: 'domcontentloaded' | 'load' | 'networkidle', timeout?: number, maxRetries?: number } = {}
+): Promise<void> {
+  const { waitUntil = 'domcontentloaded', timeout = 120_000, maxRetries = 3 } = options;
+  
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await page.goto(url, { waitUntil, timeout });
+      return; // Success
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < maxRetries) {
+        const waitTime = attempt * 2000; // 2s, 4s, 6s...
+        logger.warn({ attempt, maxRetries, waitTime, url }, 'Page navigation failed, retrying...');
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  
+  throw new Error(`Failed to navigate to ${url} after ${maxRetries} attempts: ${lastError?.message}`);
+}
+
 export async function runGeneration(options: FlowOptions, input: GenerationInput): Promise<GenerationResult> {
   const { page, baseUrl, artifactsDir } = options;
 
   const draftsUrl = new URL(DRAFTS_PATH, baseUrl).toString();
-  await page.goto(draftsUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3 });
   logger.info({ draftsUrl }, 'Opened drafts workspace');
   await capturePageState(page, artifactsDir, 'drafts-before-create');
 
@@ -177,7 +202,7 @@ async function waitForCompletion(page: Page, baseUrl: string, jobId: string): Pr
           { timeout: 30_000 }
         );
 
-        await page.goto(draftsUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3 });
         
         // Get the response from the reload
         let payload: Record<string, unknown>;
