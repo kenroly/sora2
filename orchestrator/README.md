@@ -23,6 +23,7 @@ PROFILE_ROOT=profiles
 # Settings
 TASK_TIMEOUT_MINUTES=25
 POLL_INTERVAL_SECONDS=10
+MAX_CONCURRENT_WORKERS=3
 
 # Telegram (optional)
 TELEGRAM_BOT_TOKEN=...
@@ -56,10 +57,17 @@ npm start
 ```
 
 Service sẽ:
-1. Poll API mỗi `POLL_INTERVAL_SECONDS` giây
-2. Claim task nếu có
+1. Poll API mỗi 10 giây để claim task mới (nếu chưa đạt max workers)
+2. Claim task và start worker ngay lập tức (không chờ worker xong)
 3. Chọn profile có credit >= 5, ít dùng nhất
-4. Chạy Docker container để generate
-5. Update result về server và database
+4. Chạy worker process để generate video
+5. Monitor các workers đang chạy và handle completion tự động
+6. Update result về server và database khi worker hoàn thành
+
+**Concurrent Workers:**
+- Service hỗ trợ chạy nhiều browser/workers đồng thời
+- Số lượng tối đa được config qua `MAX_CONCURRENT_WORKERS` (mặc định: 1)
+- Mỗi worker chạy độc lập, không block nhau
+- Service tự động monitor và cleanup khi workers hoàn thành
 
 

@@ -40,7 +40,8 @@ const schema = z.object({
   TELEGRAM_CHAT_ID: z.string().optional(),
   MONITOR_GATEWAY_URL: z.string().url().optional(),
   MONITOR_GATEWAY_TOKEN: z.string().optional(),
-  MONITOR_CAPTURE_INTERVAL_MS: z.coerce.number().default(1000)
+  MONITOR_CAPTURE_INTERVAL_MS: z.coerce.number().default(1000),
+  MAX_CONCURRENT_WORKERS: z.coerce.number().min(1).default(1)
 });
 
 export type RuntimeConfig = z.infer<typeof schema>;
@@ -62,6 +63,7 @@ export const runtimeConfig: RuntimeConfig = schema.parse({
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   MONITOR_GATEWAY_URL: process.env.MONITOR_GATEWAY_URL,
   MONITOR_GATEWAY_TOKEN: process.env.MONITOR_GATEWAY_TOKEN,
-  MONITOR_CAPTURE_INTERVAL_MS: process.env.MONITOR_CAPTURE_INTERVAL_MS
+  MONITOR_CAPTURE_INTERVAL_MS: process.env.MONITOR_CAPTURE_INTERVAL_MS,
+  MAX_CONCURRENT_WORKERS: process.env.MAX_CONCURRENT_WORKERS
 });
 
