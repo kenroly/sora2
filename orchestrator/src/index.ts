@@ -206,11 +206,14 @@ class Orchestrator {
       return false;
     }
 
-    // Check for available profile first before claiming a task
-    const profile = await this.accountSelector.selectAvailableProfile();
+    // Get list of profiles currently in use by active workers
+    const activeProfileNames = Array.from(this.activeWorkers.values()).map(w => w.profile.name);
+    
+    // Check for available profile first before claiming a task (exclude profiles in use)
+    const profile = await this.accountSelector.selectAvailableProfile(activeProfileNames);
     
     if (!profile) {
-      logger.debug('No available profiles, skipping task claim');
+      logger.debug({ activeProfileNames, activeWorkers: this.activeWorkers.size }, 'No available profiles, skipping task claim');
       return false;
     }
 

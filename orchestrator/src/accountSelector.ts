@@ -37,7 +37,7 @@ export class AccountSelector {
     await this.client.close();
   }
 
-  async selectAvailableProfile(): Promise<ProfileRecord | null> {
+  async selectAvailableProfile(excludeProfileNames: string[] = []): Promise<ProfileRecord | null> {
     // First, get all profiles in database to log them
     const allProfiles = await this.profilesCollection.find({}).toArray();
     const allProfilesForMachine = allProfiles.filter(p => p.machineId === runtimeConfig.MACHINE_ID);
@@ -46,6 +46,7 @@ export class AccountSelector {
       machineId: runtimeConfig.MACHINE_ID,
       totalProfilesInDb: allProfiles.length,
       profilesForThisMachineCount: allProfilesForMachine.length,
+      excludeProfileNames,
       allProfiles: allProfiles.map(p => ({
         name: p.name,
         machineId: p.machineId,
@@ -61,16 +62,24 @@ export class AccountSelector {
       }))
     }, 'Profile status check');
 
+    // Build query to exclude profiles currently in use
+    const query: any = {
+      machineId: runtimeConfig.MACHINE_ID, // Only profiles for this machine
+      status: 'active',
+      $or: [
+        { creditRemaining: { $gte: 5 } },
+        { creditRemaining: null } // Allow profiles without credit info yet
+      ]
+    };
+
+    // Exclude profiles that are currently being used by active workers
+    if (excludeProfileNames.length > 0) {
+      query.name = { $nin: excludeProfileNames };
+    }
+
     // Find active profiles with credit >= 5 FOR THIS MACHINE, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
-      {
-        machineId: runtimeConfig.MACHINE_ID, // Only profiles for this machine
-        status: 'active',
-        $or: [
-          { creditRemaining: { $gte: 5 } },
-          { creditRemaining: null } // Allow profiles without credit info yet
-        ]
-      },
+      query,
       {
         sort: { lastRunAt: 1 } // nulls first (never used)
       }
@@ -103,6 +112,15 @@ export class AccountSelector {
               ? `All ${lowCreditProfiles.length} profile(s) have low credit (< 5)`
               : 'Unknown reason'
       }, 'No available profiles found for this machine');
+    }
+
+    if (profile) {
+      // Update lastRunAt immediately to prevent other workers from selecting the same profile
+      await this.profilesCollection.updateOne(
+        { _id: profile._id },
+        { $set: { lastRunAt: new Date().toISOString(), updatedAt: new Date().toISOString() } }
+      );
+      logger.info({ profileName: profile.name }, 'Profile locked and lastRunAt updated');
     }
 
     return profile;
