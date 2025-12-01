@@ -108,27 +108,33 @@ export class WorkerRunner {
           // Try to parse JSON output from stdout
           try {
             const lines = stdout.trim().split('\n');
-            const jsonLine = lines.find((line) => {
-              try {
-                JSON.parse(line);
-                return true;
-              } catch {
-                return false;
-              }
-            });
+            let parsedResult: any | null = null;
 
-            if (jsonLine) {
-              const result = JSON.parse(jsonLine);
-              if (result.success && result.publicUrl) {
-                logger.info({ result }, 'Worker completed successfully');
-                resolvePromise({
-                  success: true,
-                  publicUrl: result.publicUrl,
-                  downloadUrl: result.downloadUrl,
-                  jobId: result.jobId
-                });
-                return;
+            // Walk from the end to prefer the final JSON status object
+            for (let i = lines.length - 1; i >= 0; i -= 1) {
+              const line = lines[i].trim();
+              if (!line.length) continue;
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+                  parsedResult = parsed;
+                  break;
+                }
+              } catch {
+                // ignore non‑JSON lines
               }
+            }
+
+            if (parsedResult && parsedResult.success && parsedResult.publicUrl) {
+              const result = parsedResult;
+              logger.info({ result }, 'Worker completed successfully');
+              resolvePromise({
+                success: true,
+                publicUrl: result.publicUrl,
+                downloadUrl: result.downloadUrl,
+                jobId: result.jobId
+              });
+              return;
             }
 
             // Fallback: no JSON found or success=false

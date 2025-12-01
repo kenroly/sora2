@@ -1,0 +1,12 @@
+{
+  "name": "sora2",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "worker": "cd sora-worker && npm start --",
+    "orchestrator": "cd orchestrator && npm start",
+    "orchestrator:dev": "cd orchestrator && npm run dev"
+  }
+}
+
