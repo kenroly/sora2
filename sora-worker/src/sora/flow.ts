@@ -308,8 +308,74 @@ async function applyComposerOptions(page: Page, input: GenerationInput): Promise
   }
 
   await settingsButton.click();
+  await page.waitForTimeout(500); // Wait for menu to open
 
-  await selectMenuItem(page, new RegExp(`${input.durationSeconds}\\s*s`, 'i'), 'duration');
+  // Debug: Log all menu items to see what's available
+  try {
+    const allMenuItems = await page.getByRole('menuitem').all();
+    const menuTexts = await Promise.all(
+      allMenuItems.map(async (item) => {
+        try {
+          return await item.textContent({ timeout: 500 });
+        } catch {
+          return null;
+        }
+      })
+    );
+    logger.info({ menuItems: menuTexts.filter(Boolean) }, 'Available menu items for duration selection');
+  } catch (error) {
+    logger.debug({ error }, 'Could not log menu items');
+  }
+
+  // Try multiple patterns to find duration menu item
+  const durationPatterns = [
+    new RegExp(`${input.durationSeconds}\\s*s`, 'i'), // "15s" or "15 s"
+    new RegExp(`${input.durationSeconds}\\s*seconds?`, 'i'), // "15 seconds" or "15 second"
+    new RegExp(`${input.durationSeconds}\\s*sec`, 'i'), // "15 sec"
+    new RegExp(`^${input.durationSeconds}$`, 'i'), // Just "15"
+  ];
+  
+  let durationSelected = false;
+  
+  // First try: by role menuitem with name pattern
+  for (const pattern of durationPatterns) {
+    const item = page.getByRole('menuitem', { name: pattern }).first();
+    if (await item.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await item.click();
+      await page.waitForTimeout(200);
+      logger.info({ label: 'duration', pattern: pattern.toString(), duration: input.durationSeconds }, 'Composer option updated');
+      durationSelected = true;
+      break;
+    }
+  }
+  
+  // Second try: find by text content if role-based search failed
+  if (!durationSelected) {
+    try {
+      const allMenuItems = await page.getByRole('menuitem').all();
+      for (const item of allMenuItems) {
+        const text = await item.textContent({ timeout: 500 }).catch(() => null);
+        if (text) {
+          for (const pattern of durationPatterns) {
+            if (pattern.test(text)) {
+              await item.click();
+              await page.waitForTimeout(200);
+              logger.info({ label: 'duration', text, duration: input.durationSeconds }, 'Composer option updated (found by text)');
+              durationSelected = true;
+              break;
+            }
+          }
+          if (durationSelected) break;
+        }
+      }
+    } catch (error) {
+      logger.debug({ error }, 'Could not find duration by text content');
+    }
+  }
+  
+  if (!durationSelected) {
+    logger.warn({ duration: input.durationSeconds }, 'Duration option not found; leaving default');
+  }
 
   const orientationPattern = input.orientation === 'portrait' ? /portrait/i : /landscape/i;
   await selectMenuItem(page, orientationPattern, 'orientation');
