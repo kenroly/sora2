@@ -307,91 +307,117 @@ async function applyComposerOptions(page: Page, input: GenerationInput): Promise
     return;
   }
 
-  await settingsButton.click();
-  await page.waitForTimeout(500); // Wait for menu to open
+  let rootMenu = await openSettingsMenu(page, settingsButton);
 
-  // Debug: Log all menu items to see what's available
-  try {
-    const allMenuItems = await page.getByRole('menuitem').all();
-    const menuTexts = await Promise.all(
-      allMenuItems.map(async (item) => {
-        try {
-          return await item.textContent({ timeout: 500 });
-        } catch {
-          return null;
-        }
-      })
-    );
-    logger.info({ menuItems: menuTexts.filter(Boolean) }, 'Available menu items for duration selection');
-  } catch (error) {
-    logger.debug({ error }, 'Could not log menu items');
-  }
-
-  // Try multiple patterns to find duration menu item
   const durationPatterns = [
-    new RegExp(`${input.durationSeconds}\\s*s`, 'i'), // "15s" or "15 s"
-    new RegExp(`${input.durationSeconds}\\s*seconds?`, 'i'), // "15 seconds" or "15 second"
-    new RegExp(`${input.durationSeconds}\\s*sec`, 'i'), // "15 sec"
-    new RegExp(`^${input.durationSeconds}$`, 'i'), // Just "15"
+    new RegExp(`${input.durationSeconds}\\s*s`, 'i'),
+    new RegExp(`${input.durationSeconds}\\s*seconds?`, 'i'),
+    new RegExp(`${input.durationSeconds}\\s*sec`, 'i'),
+    new RegExp(`^${input.durationSeconds}$`, 'i')
   ];
-  
-  let durationSelected = false;
-  
-  // First try: by role menuitem with name pattern
-  for (const pattern of durationPatterns) {
-    const item = page.getByRole('menuitem', { name: pattern }).first();
-    if (await item.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await item.click();
-      await page.waitForTimeout(200);
-      logger.info({ label: 'duration', pattern: pattern.toString(), duration: input.durationSeconds }, 'Composer option updated');
-      durationSelected = true;
-      break;
-    }
-  }
-  
-  // Second try: find by text content if role-based search failed
-  if (!durationSelected) {
-    try {
-      const allMenuItems = await page.getByRole('menuitem').all();
-      for (const item of allMenuItems) {
-        const text = await item.textContent({ timeout: 500 }).catch(() => null);
-        if (text) {
-          for (const pattern of durationPatterns) {
-            if (pattern.test(text)) {
-              await item.click();
-              await page.waitForTimeout(200);
-              logger.info({ label: 'duration', text, duration: input.durationSeconds }, 'Composer option updated (found by text)');
-              durationSelected = true;
-              break;
-            }
-          }
-          if (durationSelected) break;
-        }
-      }
-    } catch (error) {
-      logger.debug({ error }, 'Could not find duration by text content');
-    }
-  }
-  
+
+  const durationSelected = await selectFromSubmenu(
+    page,
+    rootMenu,
+    /^Duration/i,
+    durationPatterns,
+    'duration'
+  );
+
+  await page.keyboard.press('Escape').catch(() => undefined); // Close after duration
+
   if (!durationSelected) {
     logger.warn({ duration: input.durationSeconds }, 'Duration option not found; leaving default');
   }
 
-  const orientationPattern = input.orientation === 'portrait' ? /portrait/i : /landscape/i;
-  await selectMenuItem(page, orientationPattern, 'orientation');
+  rootMenu = await openSettingsMenu(page, settingsButton);
 
-  await page.keyboard.press('Escape').catch(() => undefined);
+  const orientationPatterns = input.orientation === 'portrait' ? [/portrait/i] : [/landscape/i];
+  const orientationSelected = await selectFromSubmenu(
+    page,
+    rootMenu,
+    /^Orientation/i,
+    orientationPatterns,
+    'orientation'
+  );
+
+  if (!orientationSelected) {
+    logger.warn({ orientation: input.orientation }, 'Orientation option not found; leaving default');
+  }
+
+  await page.keyboard.press('Escape').catch(() => undefined); // Close after orientation
 }
 
-async function selectMenuItem(page: Page, pattern: RegExp, label: string): Promise<void> {
-  const item = page.getByRole('menuitem', { name: pattern }).first();
-  if (await item.isVisible().catch(() => false)) {
-    await item.click();
-    await page.waitForTimeout(200);
-    logger.info({ label }, 'Composer option updated');
-  } else {
-    logger.warn({ label }, 'Composer option not found; leaving default');
+async function openSettingsMenu(page: Page, settingsButton: Locator): Promise<Locator> {
+  await settingsButton.click();
+  await page.waitForTimeout(400);
+  return page.locator('[role="menu"]').last();
+}
+
+async function selectFromSubmenu(
+  page: Page,
+  parentMenu: Locator,
+  triggerPattern: RegExp,
+  optionPatterns: RegExp[],
+  label: string
+): Promise<boolean> {
+  const trigger = parentMenu.getByRole('menuitem', { name: triggerPattern }).first();
+  if (!(await trigger.isVisible().catch(() => false))) {
+    logger.warn({ label }, 'Submenu trigger not found');
+    return false;
   }
+
+  const menus = page.locator('[role="menu"]');
+  const beforeCount = await menus.count();
+
+  await trigger.click();
+  await page.waitForTimeout(200);
+
+  const afterCount = await menus.count();
+  const submenuIndex = Math.max(afterCount - 1, 0);
+  const submenu = menus.nth(submenuIndex);
+
+  return await selectMenuItemInMenu(page, submenu, optionPatterns, label);
+}
+
+async function selectMenuItemInMenu(
+  page: Page,
+  menu: Locator,
+  patterns: RegExp[],
+  label: string
+): Promise<boolean> {
+  for (const pattern of patterns) {
+    const menuItem = menu.getByRole('menuitem', { name: pattern }).first();
+    const radioItem = menu.getByRole('menuitemradio', { name: pattern }).first();
+
+    if (await menuItem.isVisible({ timeout: 500 }).catch(() => false)) {
+      await menuItem.click();
+      await page.waitForTimeout(200);
+      logger.info({ label, pattern: pattern.toString(), role: 'menuitem' }, 'Composer option updated');
+      return true;
+    }
+
+    if (await radioItem.isVisible({ timeout: 500 }).catch(() => false)) {
+      await radioItem.click();
+      await page.waitForTimeout(200);
+      logger.info({ label, pattern: pattern.toString(), role: 'menuitemradio' }, 'Composer option updated');
+      return true;
+    }
+  }
+
+  const allItems = await menu.locator('[role="menuitem"], [role="menuitemradio"]').all();
+  for (const item of allItems) {
+    const text = await item.textContent({ timeout: 500 }).catch(() => null);
+    if (!text) continue;
+    if (patterns.some((pattern) => pattern.test(text))) {
+      await item.click();
+        await page.waitForTimeout(200);
+      logger.info({ label, text }, 'Composer option updated (by text)');
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function waitForEnabled(page: Page, locator: Locator): Promise<void> {
