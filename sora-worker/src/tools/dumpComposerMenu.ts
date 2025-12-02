@@ -108,6 +108,27 @@ async function dumpMenu(profileName: string, skipAuthCheck: boolean): Promise<vo
       } else {
         console.log('Could not capture duration menu HTML');
       }
+
+      const option10 = durationMenu
+        .getByRole('menuitemradio', { name: /10\s*(seconds|sec|s)?/i })
+        .first();
+      if (await option10.isVisible().catch(() => false)) {
+        await option10.click();
+        await page.waitForTimeout(500);
+        logger.info('Selected 10s option successfully');
+      } else {
+        logger.warn('Could not find 10s option to select');
+      }
+
+      // Reopen menu to show current selection
+      await durationTrigger.click();
+      await page.waitForTimeout(200);
+      const updatedHtml = await durationMenu.evaluate((el) => el.outerHTML).catch(() => null);
+      if (updatedHtml) {
+        console.log('----- DURATION MENU HTML AFTER SELECTION START -----');
+        console.log(updatedHtml);
+        console.log('----- DURATION MENU HTML AFTER SELECTION END -----');
+      }
     } else {
       console.log('Duration trigger not visible');
     }

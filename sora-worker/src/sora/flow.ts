@@ -124,7 +124,7 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
   await promptBox.click();
   await promptBox.fill(input.prompt);
 
-  await applyComposerOptions(page, input);
+  await applyComposerOptions(page, input, artifactsDir);
 
   const generateButton = page.getByRole('button', { name: /create video|generate|submit/i }).first();
   await waitForEnabled(page, generateButton);
@@ -300,7 +300,7 @@ async function promoteAndCopyPublicUrl(page: Page): Promise<string | undefined> 
   return url;
 }
 
-async function applyComposerOptions(page: Page, input: GenerationInput): Promise<void> {
+async function applyComposerOptions(page: Page, input: GenerationInput, artifactsDir?: string): Promise<void> {
   const settingsButton = page.getByRole('button', { name: /^settings$/i }).last();
   if (!(await settingsButton.isVisible().catch(() => false))) {
     logger.warn('Composer settings button not found; using default duration and orientation.');
@@ -324,6 +324,10 @@ async function applyComposerOptions(page: Page, input: GenerationInput): Promise
     'duration'
   );
 
+  if (durationSelected) {
+    await capturePageState(page, artifactsDir, 'composer-duration-selected');
+  }
+
   await page.keyboard.press('Escape').catch(() => undefined); // Close after duration
 
   if (!durationSelected) {
@@ -340,6 +344,10 @@ async function applyComposerOptions(page: Page, input: GenerationInput): Promise
     orientationPatterns,
     'orientation'
   );
+
+  if (orientationSelected) {
+    await capturePageState(page, artifactsDir, 'composer-orientation-selected');
+  }
 
   if (!orientationSelected) {
     logger.warn({ orientation: input.orientation }, 'Orientation option not found; leaving default');
