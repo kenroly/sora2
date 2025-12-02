@@ -99,7 +99,7 @@ class Orchestrator {
 
   async startWorker(task: TaskData, profile: ProfileRecord): Promise<void> {
     const taskId = task.id;
-    
+
     // Save task to database
     await this.taskStore.saveTask(task, runtimeConfig.PRODUCT_CODE);
 
@@ -176,30 +176,30 @@ class Orchestrator {
     );
 
     try {
-      if (result.success && result.publicUrl) {
-        // Update task as completed
+    if (result.success && result.publicUrl) {
+      // Update task as completed
         await this.taskStore.updateTaskStatus(taskId, 'completed', {
-          publicUrl: result.publicUrl
-        });
+        publicUrl: result.publicUrl
+      });
         await this.taskStore.incrementDailyStats('completed', 1);
 
-        // Complete task on server
+      // Complete task on server
         const completed = await this.taskClient.completeTask(taskId, result.publicUrl);
-        if (completed) {
+      if (completed) {
           logger.info({ taskId, publicUrl: result.publicUrl }, 'Task completed successfully');
-        } else {
-          logger.error({ taskId }, 'Failed to mark task as completed on server');
-        }
       } else {
-        // Check if it's a timeout
-        const errorMessage = result.error || 'Unknown error';
-        const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('Timeout');
-        const status: 'failed' | 'timeout' = isTimeout ? 'timeout' : 'failed';
+          logger.error({ taskId }, 'Failed to mark task as completed on server');
+      }
+    } else {
+      // Check if it's a timeout
+      const errorMessage = result.error || 'Unknown error';
+      const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('Timeout');
+      const status: 'failed' | 'timeout' = isTimeout ? 'timeout' : 'failed';
 
-        // Update task status
+      // Update task status
         await this.taskStore.updateTaskStatus(taskId, status, {
-          error: errorMessage
-        });
+        error: errorMessage
+      });
         await this.taskStore.incrementDailyStats('failed');
 
         logger.error({ taskId, error: errorMessage, status }, 'Task failed, resetting for retry');
@@ -211,8 +211,8 @@ class Orchestrator {
           logger.warn({ taskId }, 'Failed to reset task');
         }
         await sendErrorNotification(taskId, errorMessage, activeWorker.profile.name);
-      }
-    } catch (error) {
+    }
+  } catch (error) {
       logger.error({ taskId, error }, 'Error handling worker completion');
     }
   }
@@ -295,13 +295,13 @@ async function main(): Promise<void> {
     while (!orchestrator.isShuttingDown) {
       try {
         await orchestrator.tryClaimAndStartTask();
-      } catch (error) {
-        logger.error({ error }, 'Error in main loop');
-        await sendErrorNotification('unknown', error instanceof Error ? error.message : String(error));
-      }
+    } catch (error) {
+      logger.error({ error }, 'Error in main loop');
+      await sendErrorNotification('unknown', error instanceof Error ? error.message : String(error));
+    }
 
-      // Wait before next poll
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    // Wait before next poll
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
   } finally {
     clearInterval(monitorInterval);

@@ -121,14 +121,51 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
     await capturePageState(page, artifactsDir, 'composer-missing');
     throw new Error(`Composer prompt not found: ${(error as Error).message}`);
   });
+
+  await applyComposerOptions(page, promptBox, input, artifactsDir);
+
   await promptBox.click();
   await promptBox.fill(input.prompt);
 
-  await applyComposerOptions(page, input, artifactsDir);
+  const composerForm = promptBox.locator('xpath=ancestor::form[1]');
+  let composerButton: Locator | null = null;
+  if ((await composerForm.count().catch(() => 0)) > 0) {
+    composerButton = composerForm.getByRole('button', { name: /create video|generate|submit/i }).first();
+  } else {
+    logger.warn('Composer form not found; falling back to global generate button search');
+    composerButton = page.getByRole('button', { name: /create video|generate|submit/i }).first();
+  }
 
-  const generateButton = page.getByRole('button', { name: /create video|generate|submit/i }).first();
-  await waitForEnabled(page, generateButton);
-  await generateButton.click();
+  let submitted = false;
+  if (composerButton) {
+    try {
+      await waitForEnabled(page, composerButton, artifactsDir);
+      await composerButton.click({ timeout: 10_000 });
+      submitted = true;
+      logger.info('Submitted prompt by clicking composer button');
+    } catch (buttonError) {
+      logger.warn({ buttonError }, 'Generate button click failed, falling back to keyboard submit');
+    }
+  }
+
+  if (!submitted) {
+    await promptBox.click().catch(() => undefined);
+    try {
+      await page.keyboard.press('Control+Enter');
+      submitted = true;
+      logger.info('Submitted prompt using Control+Enter fallback');
+    } catch (ctrlError) {
+      logger.warn({ ctrlError }, 'Control+Enter fallback failed, trying Enter');
+      try {
+        await page.keyboard.press('Enter');
+        submitted = true;
+        logger.info('Submitted prompt using Enter fallback');
+      } catch (enterError) {
+        logger.error({ enterError }, 'Failed to submit prompt via keyboard');
+        throw enterError instanceof Error ? enterError : new Error(String(enterError));
+      }
+    }
+  }
   logger.info('Prompt submitted. Waiting for completion…');
 
   const jobId = await waitForJobId(page);
@@ -300,7 +337,12 @@ async function promoteAndCopyPublicUrl(page: Page): Promise<string | undefined> 
   return url;
 }
 
-async function applyComposerOptions(page: Page, input: GenerationInput, artifactsDir?: string): Promise<void> {
+async function applyComposerOptions(
+  page: Page,
+  promptBox: Locator,
+  input: GenerationInput,
+  artifactsDir?: string
+): Promise<void> {
   const settingsButton = page.getByRole('button', { name: /^settings$/i }).last();
   if (!(await settingsButton.isVisible().catch(() => false))) {
     logger.warn('Composer settings button not found; using default duration and orientation.');
@@ -326,6 +368,7 @@ async function applyComposerOptions(page: Page, input: GenerationInput, artifact
 
   if (durationSelected) {
     await capturePageState(page, artifactsDir, 'composer-duration-selected');
+    await promptBox.focus().catch(() => undefined);
   }
 
   await page.keyboard.press('Escape').catch(() => undefined); // Close after duration
@@ -347,6 +390,7 @@ async function applyComposerOptions(page: Page, input: GenerationInput, artifact
 
   if (orientationSelected) {
     await capturePageState(page, artifactsDir, 'composer-orientation-selected');
+    await promptBox.focus().catch(() => undefined);
   }
 
   if (!orientationSelected) {
@@ -403,7 +447,8 @@ async function selectMenuItemInMenu(
         .evaluate((el) => !el.hasAttribute('aria-disabled') && el.getAttribute('data-disabled') !== 'true')
         .catch(() => false);
       if (enabled) {
-        await menuItem.click();
+        await menuItem.focus().catch(() => undefined);
+        await page.keyboard.press('Enter');
         await page.waitForTimeout(200);
         logger.info({ label, pattern: pattern.toString(), role: 'menuitem' }, 'Composer option updated');
         return true;
@@ -417,7 +462,8 @@ async function selectMenuItemInMenu(
         .evaluate((el) => !el.hasAttribute('aria-disabled') && el.getAttribute('data-disabled') !== 'true')
         .catch(() => false);
       if (enabled) {
-        await radioItem.click();
+        await radioItem.focus().catch(() => undefined);
+        await page.keyboard.press('Enter');
         await page.waitForTimeout(200);
         logger.info({ label, pattern: pattern.toString(), role: 'menuitemradio' }, 'Composer option updated');
         return true;
@@ -439,7 +485,8 @@ async function selectMenuItemInMenu(
         logger.warn({ label, text }, 'Matched option by text is disabled, skipping');
         continue;
       }
-      await item.click();
+      await item.focus().catch(() => undefined);
+      await page.keyboard.press('Enter');
       await page.waitForTimeout(200);
       logger.info({ label, text }, 'Composer option updated (by text)');
       return true;
@@ -449,17 +496,22 @@ async function selectMenuItemInMenu(
   return false;
 }
 
-async function waitForEnabled(page: Page, locator: Locator): Promise<void> {
-  await locator.waitFor({ state: 'visible', timeout: 30_000 });
-  const handle = await locator.elementHandle({ timeout: 30_000 });
-  if (!handle) {
-    throw new Error('Failed to resolve button handle for enablement check.');
+async function waitForEnabled(page: Page, locator: Locator, artifactsDir?: string): Promise<void> {
+  try {
+    await locator.waitFor({ state: 'visible', timeout: 30_000 });
+    const handle = await locator.elementHandle({ timeout: 30_000 });
+    if (!handle) {
+      throw new Error('Failed to resolve button handle for enablement check.');
+    }
+    await page.waitForFunction(
+      (btn) => !btn.hasAttribute('disabled') && btn.getAttribute('data-disabled') !== 'true',
+      handle,
+      { timeout: 15_000 }
+    );
+  } catch (error) {
+    logger.warn({ error }, 'waitForEnabled: button did not become enabled in time, clicking anyway');
+    await capturePageState(page, artifactsDir, 'generate-button-not-enabled');
   }
-  await page.waitForFunction(
-    (btn) => !btn.hasAttribute('disabled') && btn.getAttribute('data-disabled') !== 'true',
-    handle,
-    { timeout: 15_000 }
-  );
 }
 
 async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: string): Promise<string | undefined> {
