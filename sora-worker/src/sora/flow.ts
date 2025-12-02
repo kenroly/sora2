@@ -399,17 +399,31 @@ async function selectMenuItemInMenu(
     const radioItem = menu.getByRole('menuitemradio', { name: pattern }).first();
 
     if (await menuItem.isVisible({ timeout: 500 }).catch(() => false)) {
-      await menuItem.click();
-      await page.waitForTimeout(200);
-      logger.info({ label, pattern: pattern.toString(), role: 'menuitem' }, 'Composer option updated');
-      return true;
+      const enabled = await menuItem
+        .evaluate((el) => !el.hasAttribute('aria-disabled') && el.getAttribute('data-disabled') !== 'true')
+        .catch(() => false);
+      if (enabled) {
+        await menuItem.click();
+        await page.waitForTimeout(200);
+        logger.info({ label, pattern: pattern.toString(), role: 'menuitem' }, 'Composer option updated');
+        return true;
+      } else {
+        logger.warn({ label, pattern: pattern.toString(), role: 'menuitem' }, 'Matched option is disabled, skipping');
+      }
     }
 
     if (await radioItem.isVisible({ timeout: 500 }).catch(() => false)) {
-      await radioItem.click();
-      await page.waitForTimeout(200);
-      logger.info({ label, pattern: pattern.toString(), role: 'menuitemradio' }, 'Composer option updated');
-      return true;
+      const enabled = await radioItem
+        .evaluate((el) => !el.hasAttribute('aria-disabled') && el.getAttribute('data-disabled') !== 'true')
+        .catch(() => false);
+      if (enabled) {
+        await radioItem.click();
+        await page.waitForTimeout(200);
+        logger.info({ label, pattern: pattern.toString(), role: 'menuitemradio' }, 'Composer option updated');
+        return true;
+      } else {
+        logger.warn({ label, pattern: pattern.toString(), role: 'menuitemradio' }, 'Matched option is disabled, skipping');
+      }
     }
   }
 
@@ -418,8 +432,15 @@ async function selectMenuItemInMenu(
     const text = await item.textContent({ timeout: 500 }).catch(() => null);
     if (!text) continue;
     if (patterns.some((pattern) => pattern.test(text))) {
+      const enabled = await item
+        .evaluate((el) => !el.hasAttribute('aria-disabled') && el.getAttribute('data-disabled') !== 'true')
+        .catch(() => false);
+      if (!enabled) {
+        logger.warn({ label, text }, 'Matched option by text is disabled, skipping');
+        continue;
+      }
       await item.click();
-        await page.waitForTimeout(200);
+      await page.waitForTimeout(200);
       logger.info({ label, text }, 'Composer option updated (by text)');
       return true;
     }
