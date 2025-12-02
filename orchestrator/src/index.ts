@@ -24,13 +24,22 @@ function mapDimensionToOrientation(dimension?: string): 'portrait' | 'landscape'
   return 'portrait';
 }
 
-// Map timing to duration (must be 10 or 15)
-function mapTimingToDuration(timing?: number): 10 | 15 {
-  if (!timing) return 15;
+// Map timing/duration to valid duration (must be 10 or 15)
+function mapTimingToDuration(timing?: number, duration?: number): 10 | 15 {
+  // Prefer duration if available, otherwise use timing
+  const value = duration ?? timing;
+  
+  if (value === undefined || value === null) return 15;
+  
+  // Convert to number if it's a string
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
   
   // Round to nearest valid duration
-  if (timing <= 12) return 10;
-  return 15;
+  // If value is exactly 15 or greater, use 15
+  // Otherwise use 10
+  if (numValue >= 15) return 15;
+  if (numValue >= 10) return 10; // 10-14.99 -> 10
+  return 10; // < 10 -> 10
 }
 
 interface ActiveWorker {
@@ -102,8 +111,14 @@ class Orchestrator {
     });
 
     // Map task parameters
-    const duration = mapTimingToDuration(task.timing);
+    // Support both duration and timing fields from task
+    const duration = mapTimingToDuration(task.timing, task.duration);
     const orientation = mapDimensionToOrientation(task.dimension);
+    
+    logger.info(
+      { taskId: task.id, timing: task.timing, duration: task.duration, mappedDuration: duration },
+      'Duration mapping'
+    );
 
     logger.info(
       { taskId: task.id, profile: profile.name, duration, orientation },

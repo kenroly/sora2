@@ -6,6 +6,7 @@ export interface TaskData {
   prompt: string;
   image_urls?: string[];
   timing?: number;
+  duration?: number; // Some APIs return duration directly
   resolution?: string;
   dimension?: string;
   count?: number;
