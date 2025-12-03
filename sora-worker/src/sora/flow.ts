@@ -229,8 +229,8 @@ async function waitForCompletion(page: Page, baseUrl: string, jobId: string): Pr
   while (Date.now() < deadline) {
     pollCount++;
     
-    // Every 6 polls (30 seconds), reload the drafts page to trigger API call
-    if (pollCount % 6 === 0) {
+    // Every 36 polls (180 seconds), reload the drafts page to trigger API call
+    if (pollCount % 36 === 0) {
       logger.info({ pollCount }, 'Reloading drafts page to trigger API refresh');
       try {
         // Wait for the drafts API response when reloading
