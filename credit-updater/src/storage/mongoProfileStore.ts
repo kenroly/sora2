@@ -62,7 +62,11 @@ export class MongoProfileStore {
     await this.profilesCollection.createIndex({ status: 1, creditRemaining: 1, lastRunAt: 1 });
     await this.profilesCollection.createIndex({ machineId: 1 });
     await this.proxiesCollection.createIndex({ proxy: 1 }, { unique: true });
-    await this.proxiesCollection.createIndex({ assignedProfile: 1 }, { unique: true, sparse: true });
+    // Use a named index to avoid IndexKeySpecsConflict with legacy auto-named indexes
+    await this.proxiesCollection.createIndex(
+      { assignedProfile: 1 },
+      { name: 'assignedProfile_unique', unique: true, sparse: true }
+    );
   }
 
   private async seedDefaultProxies(): Promise<void> {
