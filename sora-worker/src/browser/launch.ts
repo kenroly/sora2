@@ -12,6 +12,7 @@ import type { Tag } from 'playwright-with-fingerprints';
 import './ensureEngineCwd.js';
 import { runtimeConfig } from '../config.js';
 import { logger } from '../logger.js';
+import { cleanupProfile } from './cleanupProfile.js';
 
 export interface BrowserSession {
   context: BrowserContext;
@@ -60,6 +61,9 @@ export async function launchBrowser(options: LaunchOptions): Promise<BrowserSess
   const userDataDir = resolve(options.userDataDir);
   await mkdir(userDataDir, { recursive: true });
 
+  // Cleanup lock files before launch (don't kill processes yet, only if retry needed)
+  await cleanupProfile(userDataDir, false);
+
   logger.info({ userDataDir, artifactsDir }, 'Launching Bablosoft fingerprinted browser');
 
   let fingerprint = options.fingerprint;
@@ -91,14 +95,65 @@ export async function launchBrowser(options: LaunchOptions): Promise<BrowserSess
     userDataDir 
   }, 'Launching browser (headless=false means visible window)');
 
-  const context = await plugin.launchPersistentContext(userDataDir, {
-    headless: runtimeConfig.BROWSER_HEADLESS
-  });
-
-  logger.info({ 
-    contextLaunched: true,
-    pagesCount: context.pages().length 
-  }, 'Browser context launched successfully');
+  // Retry logic for browser launch (timeout errors are common with fingerprint engine)
+  let context: BrowserContext | null = null;
+  const maxRetries = 3;
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      logger.info({ attempt, maxRetries }, 'Attempting to launch browser context');
+      
+      context = await plugin.launchPersistentContext(userDataDir, {
+        headless: runtimeConfig.BROWSER_HEADLESS,
+        // Add timeout configuration if supported
+        timeout: 120_000 // 2 minutes timeout
+      } as any);
+      
+      logger.info({ 
+        contextLaunched: true,
+        pagesCount: context.pages().length,
+        attempt
+      }, 'Browser context launched successfully');
+      
+      break; // Success, exit retry loop
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const errorMessage = lastError.message.toLowerCase();
+      const isTimeoutError = errorMessage.includes('timeout') || 
+                            errorMessage.includes('switching to profile');
+      
+      if (isTimeoutError && attempt < maxRetries) {
+        const retryDelay = attempt * 2000; // 2s, 4s, 6s delays
+        logger.warn({ 
+          attempt, 
+          maxRetries, 
+          retryDelay,
+          error: lastError.message 
+        }, 'Browser launch timeout, retrying...');
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        
+        // Cleanup profile again before retry, including killing processes this time
+        try {
+          await cleanupProfile(userDataDir, true); // Kill processes on retry
+          // Small delay to let engine recover
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (cleanupError) {
+          // Ignore cleanup errors, but log them
+          logger.debug({ error: (cleanupError as Error).message }, 'Cleanup error during retry (non-fatal)');
+        }
+      } else {
+        // Not a timeout error, or max retries reached
+        throw lastError;
+      }
+    }
+  }
+  
+  if (!context) {
+    throw lastError || new Error('Failed to launch browser context after retries');
+  }
 
   const page = context.pages()[0] ?? (await context.newPage());
   await mkdir(artifactsDir, { recursive: true });
