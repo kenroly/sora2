@@ -4,6 +4,25 @@ import { logger } from './logger.js';
 import { launchBrowser } from './browser/launch.js';
 import { checkCredits } from './sora/flow.js';
 import { MongoProfileStore, type ProfileRecord } from './storage/mongoProfileStore.js';
+import type { Page } from '@playwright/test';
+
+async function detectLoggedIn(page: Page): Promise<boolean> {
+  return Boolean(
+    await page
+      .locator(
+        [
+          '[data-testid="sora-workspace-root"]',
+          'button:has-text("New video")',
+          '[data-testid="composer-textarea"]',
+          'a[aria-label="Profile"]',
+          'a[href="/profile"]'
+        ].join(', ')
+      )
+      .first()
+      .elementHandle({ timeout: 8_000 })
+      .catch(() => null)
+  );
+}
 
 
 async function updateCreditsForProfile(profile: ProfileRecord, profileStore: MongoProfileStore): Promise<void> {
@@ -22,12 +41,8 @@ async function updateCreditsForProfile(profile: ProfileRecord, profileStore: Mon
     try {
       await page.goto(runtimeConfig.SORA_BASE_URL, { waitUntil: 'domcontentloaded' });
 
-      // Check if logged in
-      const loggedIn = await page
-        .locator('button:has-text("New video"), [data-testid="composer-textarea"]')
-        .first()
-        .elementHandle({ timeout: 5_000 })
-        .catch(() => null);
+      // Check if logged in (reuse detection similar to sora-worker)
+      const loggedIn = await detectLoggedIn(page);
 
       if (!loggedIn) {
         logger.warn({ profileName: profile.name }, 'Profile not logged in, skipping credit check');
