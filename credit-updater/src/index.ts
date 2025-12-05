@@ -10,7 +10,7 @@ async function updateCreditsForProfile(profile: ProfileRecord, profileStore: Mon
   logger.info({ profileName: profile.name }, 'Updating credits for profile');
 
   try {
-    const { context, page } = await launchBrowser({
+    const { context, page, artifactsDir } = await launchBrowser({
       userDataDir: profile.userDataDir,
       proxy: profile.proxy,
       fingerprint: profile.fingerprint,
@@ -35,7 +35,7 @@ async function updateCreditsForProfile(profile: ProfileRecord, profileStore: Mon
       }
 
       // Check credits
-      const creditInfo = await checkCredits(page, runtimeConfig.SORA_BASE_URL);
+      const creditInfo = await checkCredits(page, runtimeConfig.SORA_BASE_URL, artifactsDir);
 
       if (creditInfo) {
         const creditRemaining =

@@ -369,45 +369,281 @@ export async function checkCredits(
   baseUrl: string,
   artifactsDir?: string
 ): Promise<Record<string, unknown> | undefined> {
-  const endpoint = new URL('/backend/nf/check', baseUrl).toString();
-
-  const responsePromise = page.waitForResponse((res) => res.url().includes('/backend/nf/check'), { timeout: 15_000 });
-
   try {
-    await page.evaluate(
-      async ({ url }) => {
-        await fetch(url, { method: 'POST', credentials: 'include' });
+    // Wait for usage API response when opening usage tab (optional, don't fail if timeout)
+    const usageResponsePromise = page.waitForResponse(
+      (res) => {
+        const url = res.url();
+        return (
+          (url.includes('/backend/nf/') && url.includes('check')) ||
+          (url.includes('/backend/project_y/') && (url.includes('usage') || url.includes('settings')))
+        );
       },
-      { url: endpoint }
-    );
+      { timeout: 10_000 }
+    ).catch(() => null); // Don't throw on timeout
+
+    // Step 1: Find and click settings button (aria-label="Settings")
+    const settingsButton = page.locator('button[aria-label="Settings"]').first();
+    
+    if (!(await settingsButton.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      logger.warn('Settings button not found');
+      return undefined;
+    }
+
+    await settingsButton.click();
+    await page.waitForTimeout(500);
+    logger.info('Clicked settings button');
+
+    // Step 2: Wait for dropdown menu and click "Settings" option
+    // The dropdown should appear after clicking the settings button
+    await page.waitForTimeout(1_000);
+    
+    // Wait for dropdown/menu to appear
+    try {
+      await page.waitForSelector('[role="menu"], [role="menuitem"], [data-radix-popper-content-wrapper]', { timeout: 3_000 });
+    } catch (error) {
+      logger.warn('Dropdown menu did not appear, trying to find Settings anyway');
+    }
+    
+    // Look for "Settings" text in dropdown menu (not the button itself)
+    // Try multiple approaches
+    let clicked = false;
+    
+    // Method 1: Find menu items
+    try {
+      const menuItems = await page.locator('[role="menuitem"]').all();
+      for (const item of menuItems) {
+        const text = await item.textContent().catch(() => '');
+        if (text && text.toLowerCase().trim().includes('settings')) {
+          if (await item.isVisible({ timeout: 1_000 }).catch(() => false)) {
+            await item.click();
+            logger.info('Clicked Settings in dropdown menu (menuitem)');
+            clicked = true;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      // Continue to next method
+    }
+    
+    // Method 2: Find by text but exclude the button
+    if (!clicked) {
+      try {
+        const allSettingsElements = await page.locator('text=/^Settings$/i').all();
+        for (const element of allSettingsElements) {
+          const tagName = await element.evaluate((el) => el.tagName.toLowerCase()).catch(() => '');
+          const ariaLabel = await element.getAttribute('aria-label').catch(() => '');
+          const parent = await element.evaluateHandle((el) => el.closest('[role="menu"], [role="menuitem"]')).catch(() => null);
+          
+          // Skip if it's the button itself
+          if (tagName === 'button' && ariaLabel === 'Settings' && !parent) {
+            continue;
+          }
+          
+          if (await element.isVisible({ timeout: 1_000 }).catch(() => false)) {
+            await element.click();
+            logger.info('Clicked Settings in dropdown menu (text match)');
+            clicked = true;
+            break;
+          }
+        }
+      } catch (error) {
+        // Continue
+      }
+    }
+    
+    // Method 3: Find any clickable element with Settings text in a menu context
+    if (!clicked) {
+      try {
+        const menuContainer = page.locator('[role="menu"], [data-radix-popper-content-wrapper]').first();
+        if (await menuContainer.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          const settingsInMenu = menuContainer.locator('text=/Settings/i').first();
+          if (await settingsInMenu.isVisible({ timeout: 1_000 }).catch(() => false)) {
+            await settingsInMenu.click();
+            logger.info('Clicked Settings in dropdown menu (menu container)');
+            clicked = true;
+          }
+        }
+      } catch (error) {
+        // Continue
+      }
+    }
+    
+    if (!clicked) {
+      // Maybe the dropdown auto-opens the modal, or Settings is already selected
+      logger.warn('Settings menu item not found, assuming modal opens directly or trying direct navigation');
+    }
+    
+    await page.waitForTimeout(1_500);
+
+    // Step 3: Wait for settings modal to appear
+    // Try multiple ways to detect modal
+    let modalAppeared = false;
+    try {
+      await page.waitForSelector('role=dialog', { timeout: 10_000 });
+      modalAppeared = true;
+    } catch (error) {
+      // Try alternative selectors
+      try {
+        await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+        modalAppeared = true;
+      } catch (e) {
+        // Check if modal is already there
+        const existingModal = await page.locator('role=dialog, [role="dialog"]').first().isVisible({ timeout: 2_000 }).catch(() => false);
+        if (existingModal) {
+          modalAppeared = true;
+        }
+      }
+    }
+
+    if (!modalAppeared) {
+      logger.warn('Settings modal did not appear, but continuing anyway');
+    } else {
+      logger.info('Settings modal appeared');
+    }
+
+    await page.waitForTimeout(1_000);
+    await capturePageState(page, artifactsDir, 'settings-modal-opened');
+
+    // Step 4: Find and click "Usage" tab in sidebar
+    // Usage tab has role="tab" and contains text "Usage" - don't rely on id
+    // Find all tabs and look for one with "Usage" text
+    const allTabs = await page.locator('[role="tab"]').all();
+    
+    let usageTab = null;
+    for (const tab of allTabs) {
+      try {
+        const text = await tab.textContent().catch(() => '');
+        if (text && text.toLowerCase().trim().includes('usage')) {
+          if (await tab.isVisible({ timeout: 1_000 }).catch(() => false)) {
+            usageTab = tab;
+            logger.info('Found Usage tab by text content');
+            break;
+          }
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    if (!usageTab) {
+      // Fallback: try selector with text
+      try {
+        const tab = page.locator('[role="tab"]').filter({ hasText: /usage/i }).first();
+        if (await tab.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          usageTab = tab;
+          logger.info('Found Usage tab by filter');
+        }
+      } catch (error) {
+        logger.warn({ error }, 'Failed to find Usage tab');
+      }
+    }
+
+    if (!usageTab) {
+      logger.error('Could not find Usage tab');
+      return undefined;
+    }
+
+    await usageTab.click();
+    await page.waitForTimeout(2_000);
+    logger.info('Clicked Usage tab');
+
+    // Step 5: Wait for usage tabpanel to be active and load content
+    // Don't rely on specific id, just wait for any active tabpanel
+    await page.waitForSelector('[role="tabpanel"][data-state="active"]', { timeout: 5_000 }).catch(() => {
+      // Fallback: wait for tabpanel to appear
+      page.waitForSelector('[role="tabpanel"]', { timeout: 3_000 }).catch(() => {
+        logger.warn('Usage tabpanel did not appear');
+      });
+    });
+    
+    await page.waitForTimeout(1_000);
+
+    // Wait for API response (optional)
+    const response = await usageResponsePromise;
+
+    if (response) {
+      const payload = (await response.json()) as Record<string, unknown>;
+      await capturePageState(page, artifactsDir, 'settings-usage-loaded');
+
+      const creditRemaining =
+        payload?.rate_limit_and_credit_balance && typeof payload.rate_limit_and_credit_balance === 'object'
+          ? (payload.rate_limit_and_credit_balance as Record<string, unknown>).estimated_num_videos_remaining
+          : undefined;
+
+      if (typeof creditRemaining === 'number') {
+        logger.info({ creditRemaining }, 'Updated credit info from usage API');
+        return payload;
+      }
+    }
+
+    // Step 6: Extract credit from page content
+    // Look for the number in "video gens left" text
+    // Format: <div class="text-5xl leading-none">2</div><div class="mb-[5px] text-base leading-none">video gens left</div>
+    try {
+      // Method 1: Find the large number (text-5xl)
+      const creditNumberElement = page.locator('.text-5xl.leading-none').first();
+      if (await creditNumberElement.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        const creditText = await creditNumberElement.textContent();
+        if (creditText) {
+          const creditRemaining = parseInt(creditText.trim(), 10);
+          if (!isNaN(creditRemaining)) {
+            logger.info({ creditRemaining, source: 'page-element' }, 'Extracted credit info from usage page');
+            return {
+              rate_limit_and_credit_balance: {
+                estimated_num_videos_remaining: creditRemaining
+              }
+            } as Record<string, unknown>;
+          }
+        }
+      }
+
+      // Method 2: Find text containing "video gens left" and extract number before it
+      const creditTextElement = page.locator('text=/video gens left/i').first();
+      if (await creditTextElement.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        // Get parent container and find the number
+        const parent = creditTextElement.locator('..');
+        const allText = await parent.textContent();
+        if (allText) {
+          const match = allText.match(/(\d+)\s*video\s*gens?\s*left/i);
+          if (match) {
+            const creditRemaining = parseInt(match[1], 10);
+            logger.info({ creditRemaining, source: 'text-extraction' }, 'Extracted credit info from text');
+            return {
+              rate_limit_and_credit_balance: {
+                estimated_num_videos_remaining: creditRemaining
+              }
+            } as Record<string, unknown>;
+          }
+        }
+      }
+
+      // Method 3: Generic search for number + "video" + "left"
+      const usageContent = await page.locator('[role="tabpanel"][data-state="active"]').first().textContent({ timeout: 3_000 }).catch(() => null);
+      if (usageContent) {
+        const match = usageContent.match(/(\d+)\s*video\s*gens?\s*left/i);
+        if (match) {
+          const creditRemaining = parseInt(match[1], 10);
+          logger.info({ creditRemaining, source: 'content-extraction' }, 'Extracted credit info from tabpanel content');
+          return {
+            rate_limit_and_credit_balance: {
+              estimated_num_videos_remaining: creditRemaining
+            }
+          } as Record<string, unknown>;
+        }
+      }
+    } catch (error) {
+      logger.warn({ error }, 'Failed to extract credit from page content');
+    }
+
+    await capturePageState(page, artifactsDir, 'settings-usage-final');
+    logger.warn('Could not retrieve credit information');
+    return undefined;
   } catch (error) {
-    logger.warn({ error }, 'Failed to trigger credit check from page context.');
-  }
-
-  const response = await responsePromise.catch((error) => {
-    logger.warn({ error }, 'Did not capture /nf/check response');
-    return undefined;
-  });
-
-  if (!response) {
+    logger.error({ error }, 'Error checking credits');
     return undefined;
   }
-
-  const payload = (await response.json()) as Record<string, unknown>;
-  await capturePageState(page, artifactsDir, 'settings-usage-cache');
-
-  const creditRemaining =
-    payload?.rate_limit_and_credit_balance && typeof payload.rate_limit_and_credit_balance === 'object'
-      ? (payload.rate_limit_and_credit_balance as Record<string, unknown>).estimated_num_videos_remaining
-      : undefined;
-
-  logger.info({ creditRemaining }, 'Updated credit info');
-
-  if (typeof creditRemaining === 'number' && creditRemaining < 5) {
-    logger.warn({ creditRemaining }, 'Credit pool low; consider pausing this account for today.');
-  }
-
-  return payload;
 }
 
 async function detectPolicyViolation(page: Page, artifactsDir?: string): Promise<void> {
