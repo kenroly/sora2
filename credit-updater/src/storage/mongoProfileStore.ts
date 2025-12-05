@@ -9,6 +9,7 @@ export interface ProfileRecord {
   proxy: string;
   userDataDir: string;
   fingerprint: string | null;
+  machineId?: string | null;
   status: 'active' | 'blocked' | 'low_credit' | 'disabled';
   creditRemaining: number | null;
   dailyRunCount: number;
@@ -28,6 +29,8 @@ interface MongoProfileStoreOptions {
   mongoUri: string;
   databaseName: string;
   profileRoot: string;
+  // machineId is accepted for compatibility with callers; not used yet.
+  machineId?: string;
 }
 
 export class MongoProfileStore {
@@ -57,6 +60,7 @@ export class MongoProfileStore {
   private async ensureIndexes(): Promise<void> {
     await this.profilesCollection.createIndex({ name: 1 }, { unique: true });
     await this.profilesCollection.createIndex({ status: 1, creditRemaining: 1, lastRunAt: 1 });
+    await this.profilesCollection.createIndex({ machineId: 1 });
     await this.proxiesCollection.createIndex({ proxy: 1 }, { unique: true });
     await this.proxiesCollection.createIndex({ assignedProfile: 1 }, { unique: true, sparse: true });
   }
@@ -109,6 +113,7 @@ export class MongoProfileStore {
       proxy: available.proxy,
       userDataDir,
       fingerprint: null,
+      machineId: this.options.machineId ?? null,
       status: 'active',
       creditRemaining: null,
       dailyRunCount: 0,
@@ -176,9 +181,11 @@ export class MongoProfileStore {
   }
 
   async findAvailableProfile(): Promise<ProfileRecord | null> {
+    const machineFilter = this.options.machineId ? { machineId: this.options.machineId } : {};
     // Find active profiles with credit >= 5, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       {
+        ...machineFilter,
         status: 'active',
         $or: [
           { creditRemaining: { $gte: 5 } },
@@ -194,7 +201,8 @@ export class MongoProfileStore {
   }
 
   async getAllProfiles(): Promise<ProfileRecord[]> {
-    return await this.profilesCollection.find({}).toArray();
+    const filter = this.options.machineId ? { machineId: this.options.machineId } : {};
+    return await this.profilesCollection.find(filter).toArray();
   }
 }
 
