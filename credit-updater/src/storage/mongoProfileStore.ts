@@ -177,7 +177,15 @@ export class MongoProfileStore {
   }
 
   async findAvailableProfile(): Promise<ProfileRecord | null> {
-    const machineFilter = this.options.machineId ? { machineId: this.options.machineId } : {};
+    const machineFilter = this.options.machineId
+      ? {
+          $or: [
+            { machineId: this.options.machineId },
+            { machineId: null },
+            { machineId: { $exists: false } }
+          ]
+        }
+      : {};
     // Find active profiles with credit >= 5, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       {
@@ -197,7 +205,15 @@ export class MongoProfileStore {
   }
 
   async getAllProfiles(): Promise<ProfileRecord[]> {
-    const filter = this.options.machineId ? { machineId: this.options.machineId } : {};
+    const filter = this.options.machineId
+      ? {
+          $or: [
+            { machineId: this.options.machineId },
+            { machineId: null },
+            { machineId: { $exists: false } }
+          ]
+        }
+      : {};
     return await this.profilesCollection.find(filter).toArray();
   }
 }
