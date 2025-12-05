@@ -31,7 +31,8 @@ const schema = z.object({
   MONGODB_DATABASE: z.string().min(1).default('sora'),
   MACHINE_ID: z.string().min(1, 'MACHINE_ID is required to identify which machine this service runs on'),
   FINGERPRINT_WORKDIR: z.string().min(1).default('.fingerprint-engine'),
-  UPDATE_INTERVAL_HOURS: z.coerce.number().default(24)
+  // Run hourly by default
+  UPDATE_INTERVAL_HOURS: z.coerce.number().default(1)
 });
 
 export type RuntimeConfig = z.infer<typeof schema>;
