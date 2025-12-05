@@ -38,7 +38,20 @@ process.env.FINGERPRINT_CWD = finalFingerprintDir;
 // But we call setWorkingFolder to be absolutely sure
 // IMPORTANT: Call setWorkingFolder BEFORE any plugin operations (fetch, useFingerprint, etc.)
 plugin.setWorkingFolder(finalFingerprintDir);
-plugin.setServiceKey(runtimeConfig.BABLOSOFT_API_KEY);
+
+// Set API key both via plugin method and environment variable (some engines require env var)
+const apiKey = runtimeConfig.BABLOSOFT_API_KEY;
+if (!apiKey || apiKey.trim().length === 0) {
+  throw new Error('BABLOSOFT_API_KEY is required but is missing or empty. Please check your .env file.');
+}
+process.env.BABLOSOFT_API_KEY = apiKey;
+process.env.SERVICE_KEY = apiKey; // Some engines use SERVICE_KEY
+plugin.setServiceKey(apiKey);
+logger.info({ 
+  apiKeySet: true, 
+  apiKeyLength: apiKey.length,
+  apiKeyPrefix: apiKey.substring(0, 8) + '...'
+}, 'Bablosoft API key configured');
 
 const DEFAULT_TAGS: Tag[] = ['Microsoft Windows', 'Chrome'];
 

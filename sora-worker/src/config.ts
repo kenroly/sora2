@@ -53,17 +53,32 @@ const schema = z.object({
 
 export type RuntimeConfig = z.infer<typeof schema>;
 
-export const runtimeConfig: RuntimeConfig = schema.parse({
-  BABLOSOFT_API_KEY: process.env.BABLOSOFT_API_KEY,
-  SORA_BASE_URL: process.env.SORA_BASE_URL,
-  PROFILE_ROOT: process.env.PROFILE_DIR ?? process.env.PROFILE_ROOT,
-  MONGODB_URI: process.env.MONGODB_URI,
-  MONGODB_DATABASE: process.env.MONGODB_DATABASE,
-  MACHINE_ID: process.env.MACHINE_ID,
-  FINGERPRINT_WORKDIR: process.env.FINGERPRINT_WORKDIR ?? process.env.FINGERPRINT_ENGINE_DIR,
-  BROWSER_HEADLESS: process.env.BROWSER_HEADLESS,
-  VIDEO_UPLOAD_WEBHOOK: process.env.VIDEO_UPLOAD_WEBHOOK,
-  MONITOR_GATEWAY_URL: process.env.MONITOR_GATEWAY_URL,
-  MONITOR_GATEWAY_TOKEN: process.env.MONITOR_GATEWAY_TOKEN,
-  MONITOR_CAPTURE_INTERVAL_MS: process.env.MONITOR_CAPTURE_INTERVAL_MS
-});
+let runtimeConfig: RuntimeConfig;
+try {
+  runtimeConfig = schema.parse({
+    BABLOSOFT_API_KEY: process.env.BABLOSOFT_API_KEY,
+    SORA_BASE_URL: process.env.SORA_BASE_URL,
+    PROFILE_ROOT: process.env.PROFILE_DIR ?? process.env.PROFILE_ROOT,
+    MONGODB_URI: process.env.MONGODB_URI,
+    MONGODB_DATABASE: process.env.MONGODB_DATABASE,
+    MACHINE_ID: process.env.MACHINE_ID,
+    FINGERPRINT_WORKDIR: process.env.FINGERPRINT_WORKDIR ?? process.env.FINGERPRINT_ENGINE_DIR,
+    BROWSER_HEADLESS: process.env.BROWSER_HEADLESS,
+    VIDEO_UPLOAD_WEBHOOK: process.env.VIDEO_UPLOAD_WEBHOOK,
+    MONITOR_GATEWAY_URL: process.env.MONITOR_GATEWAY_URL,
+    MONITOR_GATEWAY_TOKEN: process.env.MONITOR_GATEWAY_TOKEN,
+    MONITOR_CAPTURE_INTERVAL_MS: process.env.MONITOR_CAPTURE_INTERVAL_MS
+  });
+} catch (error) {
+  if (error instanceof z.ZodError) {
+    const missingFields = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+    console.error(`[config] Configuration validation failed: ${missingFields}`);
+    console.error(`[config] Please check your .env file. Loaded from paths:`, envPaths);
+    if (!process.env.BABLOSOFT_API_KEY) {
+      console.error(`[config] BABLOSOFT_API_KEY is missing. Please add it to your .env file.`);
+    }
+  }
+  throw error;
+}
+
+export { runtimeConfig };

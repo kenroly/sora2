@@ -40,6 +40,12 @@ if (process.env.FINGERPRINT_WORKDIR) {
 // ALWAYS set FINGERPRINT_CWD (override any existing value to ensure correctness)
 process.env.FINGERPRINT_CWD = fingerprintDir;
 
+// Also set API key as environment variable early (some engines require this)
+// This ensures it's available before playwright-with-fingerprints is imported
+if (process.env.BABLOSOFT_API_KEY) {
+  process.env.SERVICE_KEY = process.env.BABLOSOFT_API_KEY;
+}
+
 // Export the path for use in launch.ts
 export const FINGERPRINT_ENGINE_DIR = fingerprintDir;
 
