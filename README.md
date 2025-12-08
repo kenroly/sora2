@@ -103,7 +103,7 @@ Browser sẽ mở, bạn login tay vào Sora. Sau khi login xong, nhấn Enter t
 
 Orchestrator sẽ tự động:
 - Claim task từ API server
-- Chọn profile có credit >= 5 và ít dùng nhất
+- Chọn profile có credit >= 3 và ít dùng nhất
 - Spawn tiến trình Node của `sora-worker`
 - Stream session về monitor-gateway và update result về server
 
@@ -203,7 +203,7 @@ Tất cả services đọc `.env` ở project root:
 
 ### Không có profile available
 
-- Kiểm tra MongoDB có profiles với `status: 'active'` và `creditRemaining >= 5`
+- Kiểm tra MongoDB có profiles với `status: 'active'` và `creditRemaining >= 3`
 - Chạy credit-updater để update credit
 - Tạo profile mới bằng cách login tay
 

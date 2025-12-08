@@ -162,7 +162,7 @@ export class MongoProfileStore {
   async updateCredit(name: string, creditRemaining: number): Promise<void> {
     const updatedAt = new Date().toISOString();
     const lastCreditCheckAt = new Date().toISOString();
-    const status = creditRemaining >= 5 ? 'active' : 'low_credit';
+    const status = creditRemaining >= 3 ? 'active' : 'low_credit';
 
     await this.profilesCollection.updateOne(
       { name, machineId: this.options.machineId }, // Only update profiles for this machine
@@ -200,13 +200,13 @@ export class MongoProfileStore {
   }
 
   async findAvailableProfile(): Promise<ProfileRecord | null> {
-    // Find active profiles with credit >= 5 for THIS MACHINE, ordered by lastRunAt (ascending - least used first)
+    // Find active profiles with credit >= 3 for THIS MACHINE, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       {
         machineId: this.options.machineId, // Only profiles for this machine
         status: 'active',
         $or: [
-          { creditRemaining: { $gte: 5 } },
+          { creditRemaining: { $gte: 3 } },
           { creditRemaining: null } // Allow profiles without credit info yet
         ]
       },

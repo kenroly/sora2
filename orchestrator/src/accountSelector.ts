@@ -57,7 +57,7 @@ export class AccountSelector {
       machineId: runtimeConfig.MACHINE_ID, // Only profiles for this machine
       status: 'active',
       $or: [
-        { creditRemaining: { $gte: 5 } },
+        { creditRemaining: { $gte: 3 } },
         { creditRemaining: null } // Allow profiles without credit info yet
       ]
     };
@@ -67,7 +67,7 @@ export class AccountSelector {
       query.name = { $nin: excludeProfileNames };
     }
 
-    // Find active profiles with credit >= 5 FOR THIS MACHINE, ordered by lastRunAt (ascending - least used first)
+    // Find active profiles with credit >= 3 FOR THIS MACHINE, ordered by lastRunAt (ascending - least used first)
     const profile = await this.profilesCollection.findOne(
       query,
       {
@@ -86,7 +86,7 @@ export class AccountSelector {
       // Log detailed reason why no profile is available (for this machine only)
       const inactiveProfiles = allProfilesForThisMachine.filter((p) => p.status !== 'active');
       const lowCreditProfiles = allProfilesForThisMachine.filter(
-        (p) => p.status === 'active' && p.creditRemaining !== null && p.creditRemaining < 5
+        (p) => p.status === 'active' && p.creditRemaining !== null && p.creditRemaining < 3
       );
 
       logger.warn(
@@ -104,7 +104,7 @@ export class AccountSelector {
               : inactiveProfiles.length > 0
                 ? `All ${inactiveProfiles.length} profile(s) are inactive`
                 : lowCreditProfiles.length > 0
-                  ? `All ${lowCreditProfiles.length} profile(s) have low credit (< 5)`
+                  ? `All ${lowCreditProfiles.length} profile(s) have low credit (< 3)`
                   : 'Unknown reason'
         },
         'No available profiles found for this machine'
