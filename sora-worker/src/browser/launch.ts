@@ -80,7 +80,6 @@ export async function launchBrowser(options: LaunchOptions): Promise<BrowserSess
   plugin.useFingerprint(fingerprint);
   // Only use proxy if provided and not empty
   if (options.proxy && options.proxy.trim()) {
-    logger.info({ proxy: options.proxy }, 'Applying proxy from profile');
     plugin.useProxy(options.proxy, {
       changeGeolocation: true,
       changeBrowserLanguage: true,
