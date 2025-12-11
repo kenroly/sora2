@@ -14,12 +14,23 @@ const envPaths = [
 ];
 
 let loaded = false;
+let loadedEnvPath = '';
 for (const envPath of envPaths) {
-  const result = loadEnv({ path: envPath });
+  const result = loadEnv({
+    path: envPath,
+    // Prefer .env values so refreshed keys override any existing exports
+    override: true
+  });
   if (!result.error) {
     loaded = true;
+    loadedEnvPath = envPath;
     break;
   }
+}
+if (loadedEnvPath) {
+  console.log(`[initFingerprint] Loaded .env from: ${loadedEnvPath}`);
+} else {
+  console.warn(`[initFingerprint] Could not load .env. Tried paths:`, envPaths);
 }
 
 // Get the directory where this file is located (sora-worker/src/browser)

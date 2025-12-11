@@ -13,7 +13,11 @@ const envPaths = [
 
 let loaded = false;
 for (const envPath of envPaths) {
-  const result = loadEnv({ path: envPath });
+  const result = loadEnv({
+    path: envPath,
+    // Prefer .env values so refreshed keys override any shell exports
+    override: true
+  });
   if (!result.error) {
     console.log(`[config] Loaded .env from: ${envPath}`);
     loaded = true;
