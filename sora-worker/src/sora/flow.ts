@@ -396,96 +396,126 @@ async function uploadImages(
     await writeFile(tempPath, buffer);
     logger.info({ tempPath }, 'Image downloaded to temp file');
 
-    // Try drag and drop method first (more reliable)
-    const promptBox = page.getByPlaceholder('Describe your video...').first();
-    const composerArea = promptBox.locator('xpath=ancestor::div[contains(@class, "composer") or contains(@class, "popover")]').first();
-    
+    // Method: Click "Attach media" button and upload via file input
     let uploadSuccess = false;
-
-    // Method 1: Try drag and drop onto the composer area
+    
     try {
-      logger.info('Attempting drag and drop upload');
+      logger.info('Clicking Attach media button to upload image');
       
-      // Find a drop target - try the textarea or its parent container
-      const isPromptVisible = await promptBox.isVisible().catch(() => false);
-      const composerCount = await composerArea.count();
-      const dropTarget = isPromptVisible
-        ? promptBox 
-        : composerCount > 0 
-          ? composerArea 
-          : page.locator('textarea, [role="textbox"]').first();
+      // Find and click the "Attach media" button
+      // Use SVG icon path instead of text to avoid language issues
+      // The button has an SVG with plus icon path: "M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"
+      let attachButton = page.locator('button:has(svg path[d*="M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"])').first();
+      
+      // Fallback: find button with plus icon (shorter path pattern)
+      if (await attachButton.count() === 0) {
+        attachButton = page.locator('button:has(svg path[d*="M12 6"])').first();
+      }
+      
+      // Another fallback: find button near textarea with plus icon
+      if (await attachButton.count() === 0) {
+        const promptBox = page.getByPlaceholder('Describe your video...').first();
+        if (await promptBox.isVisible().catch(() => false)) {
+          // Find button in the same container as textarea that has plus icon SVG
+          const composerContainer = promptBox.locator('xpath=ancestor::div[contains(@class, "composer") or contains(@class, "popover")]').first();
+          attachButton = composerContainer.locator('button:has(svg path[d*="M12"])').first();
+        }
+      }
+      
+      if (await attachButton.count() === 0) {
+        logger.warn('Attach media button not found by SVG icon');
+        await capturePageState(page, artifactsDir, 'attach-button-not-found');
+        return;
+      }
+      
+      if (!(await attachButton.isVisible({ timeout: 10_000 }).catch(() => false))) {
+        logger.warn('Attach media button found but not visible');
+        await capturePageState(page, artifactsDir, 'attach-button-not-visible');
+        return;
+      }
 
-      if (await dropTarget.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        // Use Playwright's drag and drop with file
-        await dropTarget.setInputFiles(tempPath);
+      logger.info('Found Attach media button, clicking...');
+      
+      // Click the button - this should trigger file picker or reveal file input
+      await attachButton.click();
+      await page.waitForTimeout(1_000); // Wait for file input to be ready
+      
+      // Find the file input - it might be hidden but still accessible
+      // Try multiple selectors to find it
+      let fileInputHandle: Locator | null = null;
+      
+      // Try different selectors for file input
+      const fileInputSelectors = [
+        'input[type="file"][accept*="image"]',
+        'input[type="file"]',
+        'input[accept*="jpeg"], input[accept*="png"], input[accept*="webp"]'
+      ];
+      
+      for (const selector of fileInputSelectors) {
+        const fileInput = page.locator(selector).first();
+        const count = await fileInput.count();
+        if (count > 0) {
+          // Check if it's actually in the DOM (even if hidden)
+          const isConnected = await fileInput.evaluate((el: HTMLInputElement) => el.isConnected).catch(() => false);
+          if (isConnected) {
+            fileInputHandle = fileInput;
+            logger.info({ selector }, 'Found file input');
+            break;
+          }
+        }
+      }
+      
+      // If still not found, wait a bit more and try again
+      if (!fileInputHandle) {
         await page.waitForTimeout(1_000);
-        
-        // Check if upload was successful by looking for image preview
-        const imagePreview = page.locator('img[src*="blob"], img[src*="data:"], [class*="image"], [class*="preview"]').first();
-        if (await imagePreview.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          uploadSuccess = true;
-          logger.info({ imageUrl }, 'Image uploaded successfully via drag and drop');
-        } else {
-          logger.warn('Drag and drop completed but no image preview found');
-        }
-      }
-    } catch (dragError) {
-      logger.warn({ dragError }, 'Drag and drop method failed, trying file input');
-    }
-
-    // Method 2: Fallback to file input if drag and drop didn't work
-    if (!uploadSuccess) {
-      try {
-        logger.info('Attempting file input upload');
-        
-        // Find the hidden file input
-        const fileInput = page.locator('input[type="file"][accept*="image"]').first();
-        const attachButton = page.locator('button[aria-label="Attach media"]').first();
-        
-        let fileInputHandle: Locator | null = null;
-
-        // Try to find file input directly
-        const fileInputCount = await fileInput.count();
-        if (fileInputCount > 0) {
+        const fileInput = page.locator('input[type="file"]').first();
+        const count = await fileInput.count();
+        if (count > 0) {
           fileInputHandle = fileInput;
-          logger.info('Found file input directly');
-        } else {
-          // Try clicking the attach button first
-          if (await attachButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-            logger.info('Clicking Attach media button to reveal file input');
-            await attachButton.click();
-            await page.waitForTimeout(500);
-            
-            const fileInputAfterClick = page.locator('input[type="file"][accept*="image"]').first();
-            const countAfterClick = await fileInputAfterClick.count();
-            if (countAfterClick > 0) {
-              fileInputHandle = fileInputAfterClick;
-              logger.info('Found file input after clicking attach button');
-            }
-          }
+          logger.info('Found file input after additional wait');
         }
-
-        if (fileInputHandle) {
-          await fileInputHandle.setInputFiles(tempPath);
-          await page.waitForTimeout(1_000);
-          
-          // Check if upload was successful
-          const imagePreview = page.locator('img[src*="blob"], img[src*="data:"], [class*="image"], [class*="preview"]').first();
-          if (await imagePreview.isVisible({ timeout: 3_000 }).catch(() => false)) {
-            uploadSuccess = true;
-            logger.info({ imageUrl }, 'Image uploaded successfully via file input');
-          }
-        }
-      } catch (fileInputError) {
-        logger.warn({ fileInputError }, 'File input method also failed');
       }
+
+      if (!fileInputHandle) {
+        logger.warn('File input not found after clicking Attach media button');
+        await capturePageState(page, artifactsDir, 'file-input-not-found');
+        return;
+      }
+
+      // Upload the file
+      logger.info({ tempPath }, 'Uploading file via file input');
+      await fileInputHandle.setInputFiles(tempPath);
+      await page.waitForTimeout(2_000); // Wait for upload to process
+      
+      // Check if upload was successful by looking for image preview or uploaded indicator
+      const imagePreview = page.locator('img[src*="blob"], img[src*="data:"], img[alt*="upload"], [class*="image"], [class*="preview"], [class*="upload"]').first();
+      const hasImagePreview = await imagePreview.isVisible({ timeout: 5_000 }).catch(() => false);
+      
+      if (hasImagePreview) {
+        uploadSuccess = true;
+        logger.info({ imageUrl }, 'Image uploaded successfully');
+        await capturePageState(page, artifactsDir, 'image-uploaded');
+      } else {
+        // Sometimes the image might be uploaded but preview takes time
+        // Check if file input value changed (file was selected)
+        const fileSelected = await fileInputHandle.evaluate((el: HTMLInputElement) => (el.files?.length ?? 0) > 0).catch(() => false);
+        if (fileSelected) {
+          logger.info('File was selected, assuming upload in progress');
+          uploadSuccess = true;
+          await capturePageState(page, artifactsDir, 'image-uploaded');
+        } else {
+          logger.warn('File input shows no file selected');
+          await capturePageState(page, artifactsDir, 'image-upload-no-preview');
+        }
+      }
+      
+    } catch (error) {
+      logger.error({ imageUrl, error }, 'Error during image upload');
+      await capturePageState(page, artifactsDir, 'image-upload-error');
     }
 
     if (!uploadSuccess) {
-      logger.warn('Both upload methods failed, but continuing with generation');
-      await capturePageState(page, artifactsDir, 'image-upload-failed');
-    } else {
-      await capturePageState(page, artifactsDir, 'image-uploaded');
+      logger.warn('Image upload may have failed, but continuing with generation');
     }
 
   } catch (error) {
@@ -1157,4 +1187,5 @@ async function detectPolicyViolation(page: Page, artifactsDir?: string): Promise
     throw new Error(`Generation failed: ${errorText}`);
   }
 }
+
 
