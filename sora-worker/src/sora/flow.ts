@@ -108,14 +108,16 @@ async function detectLoggedIn(page: Page): Promise<boolean> {
 async function gotoWithRetry(
   page: Page,
   url: string,
-  options: { waitUntil?: 'domcontentloaded' | 'load' | 'networkidle', timeout?: number, maxRetries?: number } = {}
+  options: { waitUntil?: 'domcontentloaded' | 'load' | 'networkidle', timeout?: number, maxRetries?: number, artifactsDir?: string } = {}
 ): Promise<void> {
-  const { waitUntil = 'domcontentloaded', timeout = 120_000, maxRetries = 3 } = options;
+  const { waitUntil = 'domcontentloaded', timeout = 120_000, maxRetries = 3, artifactsDir } = options;
   
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await page.goto(url, { waitUntil, timeout });
+      // Check and dismiss welcome popup after navigation
+      await dismissWelcomePopup(page, artifactsDir);
       return; // Success
     } catch (error) {
       lastError = error as Error;
@@ -134,10 +136,7 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
   const { page, baseUrl, artifactsDir } = options;
 
   const draftsUrl = new URL(DRAFTS_PATH, baseUrl).toString();
-  await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3 });
-  
-  // Dismiss welcome popup if it appears after navigation
-  await dismissWelcomePopup(page, artifactsDir);
+  await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3, artifactsDir });
   
   logger.info({ draftsUrl }, 'Opened drafts workspace');
   await capturePageState(page, artifactsDir, 'drafts-before-create');
@@ -200,7 +199,7 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
   logger.info('Prompt submitted. Waiting for completion…');
 
   const jobId = await waitForJobId(page);
-  const jobData = await waitForCompletion(page, baseUrl, jobId);
+  const jobData = await waitForCompletion(page, baseUrl, jobId, artifactsDir);
   
   // Only check for policy violation if video is not ready (no videoPath means it might be blocked)
   const hasVideoPath = jobData?.encodings && typeof jobData.encodings === 'object' 
@@ -251,7 +250,7 @@ async function waitForJobId(page: Page): Promise<string> {
   return fallback;
 }
 
-async function waitForCompletion(page: Page, baseUrl: string, jobId: string): Promise<Record<string, unknown>> {
+async function waitForCompletion(page: Page, baseUrl: string, jobId: string, artifactsDir?: string): Promise<Record<string, unknown>> {
   const draftsUrl = new URL('/drafts', baseUrl).toString();
   const deadline = Date.now() + 20 * 60 * 1_000;
   let lastResponse: Record<string, unknown> | null = null;
@@ -270,7 +269,7 @@ async function waitForCompletion(page: Page, baseUrl: string, jobId: string): Pr
           { timeout: 30_000 }
         );
 
-        await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3 });
+        await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3, artifactsDir });
         
         // Get the response from the reload
         let payload: Record<string, unknown>;
@@ -683,6 +682,7 @@ async function waitForEnabled(page: Page, locator: Locator, artifactsDir?: strin
 async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: string): Promise<string | undefined> {
   const draftsUrl = new URL(DRAFTS_PATH, baseUrl).toString();
   await page.goto(draftsUrl, { waitUntil: 'networkidle' });
+  await dismissWelcomePopup(page, artifactsDir);
   await capturePageState(page, artifactsDir, 'drafts-before-publish');
 
   // Get the first draft (newest) - all drafts show as "NEW" so we just take the first one
@@ -693,7 +693,7 @@ async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: st
     return undefined;
   }
 
-  await openRelativeLink(page, newCard, baseUrl);
+  await openRelativeLink(page, newCard, baseUrl, artifactsDir);
   await page.waitForURL(/\/d\//, { timeout: 30_000 }).catch(() => undefined);
   await capturePageState(page, artifactsDir, 'draft-detail');
 
@@ -749,6 +749,7 @@ async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: st
     );
 
   await page.goto(profileUrl, { waitUntil: 'networkidle' });
+  await dismissWelcomePopup(page, artifactsDir);
     
     try {
       await profileResponsePromise;
@@ -766,6 +767,7 @@ async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: st
       if (href) {
         const postUrl = new URL(href, baseUrl).toString();
         await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+        await dismissWelcomePopup(page, artifactsDir);
   await capturePageState(page, artifactsDir, 'profile-video');
 
         finalUrl = page.url();
@@ -792,13 +794,15 @@ async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: st
   return finalUrl;
 }
 
-async function openRelativeLink(page: Page, locator: Locator, baseUrl: string): Promise<void> {
+async function openRelativeLink(page: Page, locator: Locator, baseUrl: string, artifactsDir?: string): Promise<void> {
   const href = await locator.getAttribute('href');
   if (href) {
     await page.goto(new URL(href, baseUrl).toString(), { waitUntil: 'networkidle' });
+    await dismissWelcomePopup(page, artifactsDir);
   } else {
     await locator.click();
     await page.waitForLoadState('networkidle').catch(() => undefined);
+    await dismissWelcomePopup(page, artifactsDir);
   }
 }
 
