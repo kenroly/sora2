@@ -94,7 +94,7 @@ cli
       }
 
       const imageUrls = flags.imageUrls 
-        ? flags.imageUrls.split(',').map(url => url.trim()).filter(url => url.length > 0)
+        ? flags.imageUrls.split(',').map((url: string) => url.trim()).filter((url: string) => url.length > 0)
         : undefined;
 
       const input: GenerationInput = {
