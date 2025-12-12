@@ -229,8 +229,8 @@ async function waitForCompletion(page: Page, baseUrl: string, jobId: string): Pr
   while (Date.now() < deadline) {
     pollCount++;
     
-    // Every 36 polls (180 seconds), reload the drafts page to trigger API call
-    if (pollCount % 36 === 0) {
+    // Every 12 polls (~60 seconds), reload the drafts page to trigger API call
+    if (pollCount % 12 === 0) {
       logger.info({ pollCount }, 'Reloading drafts page to trigger API refresh');
       try {
         // Wait for the drafts API response when reloading
@@ -531,6 +531,8 @@ async function publishLatestDraft(page: Page, baseUrl: string, artifactsDir?: st
   await page.waitForURL(/\/d\//, { timeout: 30_000 }).catch(() => undefined);
   await capturePageState(page, artifactsDir, 'draft-detail');
 
+  await trimPromptIfTooLong(page, 1000, artifactsDir);
+
   // Wait for post button and click it
   const postButton = page.getByRole('button', { name: /post|publish/i }).first();
   if (await postButton.isVisible().catch(() => false)) {
@@ -632,6 +634,49 @@ async function openRelativeLink(page: Page, locator: Locator, baseUrl: string): 
     await locator.click();
     await page.waitForLoadState('networkidle').catch(() => undefined);
   }
+}
+
+async function trimPromptIfTooLong(page: Page, maxLength: number, artifactsDir?: string): Promise<void> {
+  const editButton = page
+    .locator('button')
+    .filter({ has: page.locator('svg path[d*="4.536 4.536"]') }) // pencil icon path
+    .first();
+
+  const editButtonVisible = await editButton.isVisible({ timeout: 5_000 }).catch(() => false);
+  if (!editButtonVisible) {
+    logger.warn('Edit prompt button not found; skipping prompt trim');
+    return;
+  }
+
+  await editButton.click();
+
+  const captionBox = page.getByPlaceholder('Add caption...').first();
+  const textareaVisible = await captionBox.isVisible({ timeout: 5_000 }).catch(() => false);
+  if (!textareaVisible) {
+    logger.warn('Caption textarea not visible after clicking edit; skipping prompt trim');
+    return;
+  }
+
+  const current = await captionBox.inputValue().catch(() => '');
+  if (!current || current.length <= maxLength) {
+    logger.info({ length: current.length }, 'Prompt length within limit; no trim needed');
+    return;
+  }
+
+  const trimmed = current.slice(0, maxLength);
+  await captionBox.fill(trimmed);
+  await capturePageState(page, artifactsDir, 'prompt-trimmed');
+
+  try {
+    await captionBox.press('Enter');
+  } catch {
+    // Fallback to clicking confirm/check button if available
+    const confirmButton = captionBox.locator('xpath=following::button[1]').first();
+    await confirmButton.click().catch(() => undefined);
+  }
+
+  logger.info({ originalLength: current.length, trimmedLength: trimmed.length }, 'Trimmed prompt to fit posting limit');
+  await page.waitForTimeout(500);
 }
 
 export async function checkCredits(
