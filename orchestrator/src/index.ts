@@ -177,6 +177,25 @@ class Orchestrator {
 
     try {
     if (result.success && result.publicUrl) {
+      const duplicate = await this.taskStore.findTaskByPublicUrl(result.publicUrl, taskId);
+      if (duplicate) {
+        const errorMessage = `Duplicate public URL detected (existing task: ${duplicate.taskId})`;
+        logger.warn({ taskId, duplicateTaskId: duplicate.taskId, publicUrl: result.publicUrl }, errorMessage);
+
+        await this.taskStore.updateTaskStatus(taskId, 'failed', { error: errorMessage });
+        await this.taskStore.incrementDailyStats('failed');
+
+        const reset = await this.taskClient.resetTask(taskId);
+        if (reset) {
+          logger.info({ taskId }, 'Task reset due to duplicate public URL');
+        } else {
+          logger.warn({ taskId }, 'Failed to reset task after duplicate public URL');
+        }
+
+        await sendErrorNotification(taskId, errorMessage, activeWorker.profile.name);
+        return;
+      }
+
       // Update task as completed
         await this.taskStore.updateTaskStatus(taskId, 'completed', {
         publicUrl: result.publicUrl

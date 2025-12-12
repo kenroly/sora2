@@ -11,3 +11,8 @@ export interface GenerationResult {
   metadata?: Record<string, unknown>;
 }
 
+
+
+
+
+

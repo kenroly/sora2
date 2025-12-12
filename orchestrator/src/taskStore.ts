@@ -60,6 +60,7 @@ export class TaskStore {
     await this.tasksCollection.createIndex({ taskId: 1 }, { unique: true });
     await this.tasksCollection.createIndex({ status: 1, createdAt: 1 });
     await this.tasksCollection.createIndex({ profileName: 1, createdAt: 1 });
+    await this.tasksCollection.createIndex({ publicUrl: 1, status: 1 });
     await this.dailyStatsCollection.createIndex({ date: 1 }, { unique: true });
   }
 
@@ -173,6 +174,19 @@ export class TaskStore {
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
     return await this.tasksCollection.findOne({ taskId });
+  }
+
+  async findTaskByPublicUrl(publicUrl: string, excludeTaskId?: string): Promise<TaskRecord | null> {
+    const query: Record<string, unknown> = {
+      publicUrl,
+      status: 'completed'
+    };
+
+    if (excludeTaskId) {
+      query.taskId = { $ne: excludeTaskId };
+    }
+
+    return await this.tasksCollection.findOne(query);
   }
 }
 
