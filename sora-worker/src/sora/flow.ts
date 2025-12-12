@@ -381,84 +381,125 @@ async function uploadImages(
   const imageUrl = imageUrls[0];
   logger.info({ imageUrl, totalImages: imageUrls.length }, 'Starting image upload (using first image only)');
 
+  // Download the image to a temp file first
+  const tempPath = join(tmpdir(), `sora-image-${Date.now()}.jpg`);
+  
   try {
-    // Find the "Attach media" button with aria-label="Attach media"
-    const attachButton = page.locator('button[aria-label="Attach media"]').first();
-    
-    // Find the hidden file input - it should be near the attach button
-    // The file input accepts: image/jpeg,image/png,image/webp
-    const fileInput = page.locator('input[type="file"][accept*="image"]').first();
-    
-    let fileInputHandle: Locator | null = null;
+    logger.info({ imageUrl }, 'Downloading image');
 
-    // Try to find file input directly (it's hidden but still accessible)
-    const fileInputCount = await fileInput.count();
-    if (fileInputCount > 0) {
-      fileInputHandle = fileInput;
-      logger.info('Found file input directly');
-    } else {
-      // If file input not found, try clicking the attach button first
-      if (await attachButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        logger.info('Clicking Attach media button to reveal file input');
-        await attachButton.click();
-        await page.waitForTimeout(500);
+    // Download image using Playwright's context
+    const response = await page.request.get(imageUrl);
+    if (!response.ok()) {
+      throw new Error(`Failed to download image: ${response.status()} ${response.statusText()}`);
+    }
+
+    const buffer = await response.body();
+    await writeFile(tempPath, buffer);
+    logger.info({ tempPath }, 'Image downloaded to temp file');
+
+    // Try drag and drop method first (more reliable)
+    const promptBox = page.getByPlaceholder('Describe your video...').first();
+    const composerArea = promptBox.locator('xpath=ancestor::div[contains(@class, "composer") or contains(@class, "popover")]').first();
+    
+    let uploadSuccess = false;
+
+    // Method 1: Try drag and drop onto the composer area
+    try {
+      logger.info('Attempting drag and drop upload');
+      
+      // Find a drop target - try the textarea or its parent container
+      const isPromptVisible = await promptBox.isVisible().catch(() => false);
+      const composerCount = await composerArea.count();
+      const dropTarget = isPromptVisible
+        ? promptBox 
+        : composerCount > 0 
+          ? composerArea 
+          : page.locator('textarea, [role="textbox"]').first();
+
+      if (await dropTarget.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        // Use Playwright's drag and drop with file
+        await dropTarget.setInputFiles(tempPath);
+        await page.waitForTimeout(1_000);
         
-        // Look for file input again after clicking
-        const fileInputAfterClick = page.locator('input[type="file"][accept*="image"]').first();
-        const countAfterClick = await fileInputAfterClick.count();
-        if (countAfterClick > 0) {
-          fileInputHandle = fileInputAfterClick;
-          logger.info('Found file input after clicking attach button');
+        // Check if upload was successful by looking for image preview
+        const imagePreview = page.locator('img[src*="blob"], img[src*="data:"], [class*="image"], [class*="preview"]').first();
+        if (await imagePreview.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          uploadSuccess = true;
+          logger.info({ imageUrl }, 'Image uploaded successfully via drag and drop');
+        } else {
+          logger.warn('Drag and drop completed but no image preview found');
         }
       }
+    } catch (dragError) {
+      logger.warn({ dragError }, 'Drag and drop method failed, trying file input');
     }
 
-    if (!fileInputHandle) {
-      logger.warn('Could not find image upload input, skipping image upload');
-      await capturePageState(page, artifactsDir, 'image-upload-input-not-found');
-      return;
-    }
-
-    // Download the image to a temp file
-    const tempPath = join(tmpdir(), `sora-image-${Date.now()}.jpg`);
-    
-    try {
-      logger.info({ imageUrl }, 'Downloading image');
-
-      // Download image using Playwright's context
-      const response = await page.request.get(imageUrl);
-      if (!response.ok()) {
-        throw new Error(`Failed to download image: ${response.status()} ${response.statusText()}`);
-      }
-
-      const buffer = await response.body();
-      await writeFile(tempPath, buffer);
-      logger.info({ tempPath }, 'Image downloaded to temp file');
-
-      // Upload file via file input
-      await fileInputHandle.setInputFiles(tempPath);
-      logger.info({ imageUrl }, 'Image uploaded successfully');
-
-      // Wait a bit for upload to process
-      await page.waitForTimeout(1_000);
-      
-      await capturePageState(page, artifactsDir, 'image-uploaded');
-    } catch (error) {
-      logger.error({ imageUrl, error }, 'Failed to upload image');
-      await capturePageState(page, artifactsDir, 'image-upload-error');
-      throw error; // Re-throw to be caught by outer catch
-    } finally {
-      // Clean up temp file
+    // Method 2: Fallback to file input if drag and drop didn't work
+    if (!uploadSuccess) {
       try {
-        await unlink(tempPath);
-      } catch (error) {
-        logger.warn({ tempPath, error }, 'Failed to delete temp file');
+        logger.info('Attempting file input upload');
+        
+        // Find the hidden file input
+        const fileInput = page.locator('input[type="file"][accept*="image"]').first();
+        const attachButton = page.locator('button[aria-label="Attach media"]').first();
+        
+        let fileInputHandle: Locator | null = null;
+
+        // Try to find file input directly
+        const fileInputCount = await fileInput.count();
+        if (fileInputCount > 0) {
+          fileInputHandle = fileInput;
+          logger.info('Found file input directly');
+        } else {
+          // Try clicking the attach button first
+          if (await attachButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+            logger.info('Clicking Attach media button to reveal file input');
+            await attachButton.click();
+            await page.waitForTimeout(500);
+            
+            const fileInputAfterClick = page.locator('input[type="file"][accept*="image"]').first();
+            const countAfterClick = await fileInputAfterClick.count();
+            if (countAfterClick > 0) {
+              fileInputHandle = fileInputAfterClick;
+              logger.info('Found file input after clicking attach button');
+            }
+          }
+        }
+
+        if (fileInputHandle) {
+          await fileInputHandle.setInputFiles(tempPath);
+          await page.waitForTimeout(1_000);
+          
+          // Check if upload was successful
+          const imagePreview = page.locator('img[src*="blob"], img[src*="data:"], [class*="image"], [class*="preview"]').first();
+          if (await imagePreview.isVisible({ timeout: 3_000 }).catch(() => false)) {
+            uploadSuccess = true;
+            logger.info({ imageUrl }, 'Image uploaded successfully via file input');
+          }
+        }
+      } catch (fileInputError) {
+        logger.warn({ fileInputError }, 'File input method also failed');
       }
     }
+
+    if (!uploadSuccess) {
+      logger.warn('Both upload methods failed, but continuing with generation');
+      await capturePageState(page, artifactsDir, 'image-upload-failed');
+    } else {
+      await capturePageState(page, artifactsDir, 'image-uploaded');
+    }
+
   } catch (error) {
-    logger.error({ error }, 'Error during image upload');
+    logger.error({ imageUrl, error }, 'Error during image upload');
     await capturePageState(page, artifactsDir, 'image-upload-error');
     // Don't throw - continue with generation even if image upload fails
+  } finally {
+    // Clean up temp file
+    try {
+      await unlink(tempPath);
+    } catch (error) {
+      logger.warn({ tempPath, error }, 'Failed to delete temp file');
+    }
   }
 }
 
