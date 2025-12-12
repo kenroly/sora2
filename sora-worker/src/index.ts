@@ -55,10 +55,8 @@ cli
     await profileStore.connect();
     const profile = await profileStore.ensureProfile(profileName);
 
-    // Log proxy từ DB để verify
-    logger.info({ 
+    logger.info({
       profileName: profile.name,
-      proxy: profile.proxy || '(empty - no proxy)',
       hasProxy: !!profile.proxy && profile.proxy.trim().length > 0
     }, 'Profile loaded from MongoDB');
 

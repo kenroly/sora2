@@ -147,7 +147,7 @@ export class MongoProfileStore {
       { $set: { assignedProfile: name } }
     );
 
-    logger.info({ name, proxy: available.proxy, machineId: this.options.machineId, userDataDir }, 'Created new profile entry');
+    logger.info({ name, machineId: this.options.machineId, userDataDir }, 'Created new profile entry');
     return record;
   }
 
