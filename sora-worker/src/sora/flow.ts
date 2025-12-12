@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { Locator, Page } from '@playwright/test';
 import { logger } from '../logger.js';
 import type { GenerationInput, GenerationResult } from '../types.js';
@@ -123,6 +124,11 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
   });
 
   await applyComposerOptions(page, promptBox, input, artifactsDir);
+
+  // Upload images if provided
+  if (input.imageUrls && input.imageUrls.length > 0) {
+    await uploadImages(page, input.imageUrls, artifactsDir);
+  }
 
   await promptBox.click();
   await promptBox.fill(input.prompt);
@@ -335,6 +341,100 @@ async function promoteAndCopyPublicUrl(page: Page): Promise<string | undefined> 
   }
   logger.info({ url }, 'Public share URL captured');
   return url;
+}
+
+async function uploadImages(
+  page: Page,
+  imageUrls: string[],
+  artifactsDir?: string
+): Promise<void> {
+  if (!imageUrls || imageUrls.length === 0) {
+    return;
+  }
+
+  // Sora supports only 1 image - use the first one
+  const imageUrl = imageUrls[0];
+  logger.info({ imageUrl, totalImages: imageUrls.length }, 'Starting image upload (using first image only)');
+
+  try {
+    // Find the "Attach media" button with aria-label="Attach media"
+    const attachButton = page.locator('button[aria-label="Attach media"]').first();
+    
+    // Find the hidden file input - it should be near the attach button
+    // The file input accepts: image/jpeg,image/png,image/webp
+    const fileInput = page.locator('input[type="file"][accept*="image"]').first();
+    
+    let fileInputHandle: Locator | null = null;
+
+    // Try to find file input directly (it's hidden but still accessible)
+    const fileInputCount = await fileInput.count();
+    if (fileInputCount > 0) {
+      fileInputHandle = fileInput;
+      logger.info('Found file input directly');
+    } else {
+      // If file input not found, try clicking the attach button first
+      if (await attachButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        logger.info('Clicking Attach media button to reveal file input');
+        await attachButton.click();
+        await page.waitForTimeout(500);
+        
+        // Look for file input again after clicking
+        const fileInputAfterClick = page.locator('input[type="file"][accept*="image"]').first();
+        const countAfterClick = await fileInputAfterClick.count();
+        if (countAfterClick > 0) {
+          fileInputHandle = fileInputAfterClick;
+          logger.info('Found file input after clicking attach button');
+        }
+      }
+    }
+
+    if (!fileInputHandle) {
+      logger.warn('Could not find image upload input, skipping image upload');
+      await capturePageState(page, artifactsDir, 'image-upload-input-not-found');
+      return;
+    }
+
+    // Download the image to a temp file
+    const tempPath = join(tmpdir(), `sora-image-${Date.now()}.jpg`);
+    
+    try {
+      logger.info({ imageUrl }, 'Downloading image');
+
+      // Download image using Playwright's context
+      const response = await page.request.get(imageUrl);
+      if (!response.ok()) {
+        throw new Error(`Failed to download image: ${response.status()} ${response.statusText()}`);
+      }
+
+      const buffer = await response.body();
+      await writeFile(tempPath, buffer);
+      logger.info({ tempPath }, 'Image downloaded to temp file');
+
+      // Upload file via file input
+      await fileInputHandle.setInputFiles(tempPath);
+      logger.info({ imageUrl }, 'Image uploaded successfully');
+
+      // Wait a bit for upload to process
+      await page.waitForTimeout(1_000);
+      
+      await capturePageState(page, artifactsDir, 'image-uploaded');
+    } catch (error) {
+      logger.error({ imageUrl, error }, 'Failed to upload image');
+      await capturePageState(page, artifactsDir, 'image-upload-error');
+      throw error; // Re-throw to be caught by outer catch
+    } finally {
+      // Clean up temp file
+      try {
+        await unlink(tempPath);
+      } catch (error) {
+        logger.warn({ tempPath, error }, 'Failed to delete temp file');
+      }
+    }
+  } catch (error) {
+    logger.error({ error }, 'Error during image upload');
+    await capturePageState(page, artifactsDir, 'image-upload-error');
+    // Don't throw - continue with generation even if image upload fails
+  }
 }
 
 async function applyComposerOptions(

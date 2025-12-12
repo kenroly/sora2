@@ -22,6 +22,7 @@ cli
   .option('--prompt <text>', 'Prompt that describes the video')
   .option('--duration <seconds>', 'Duration in seconds (10 or 15)', { default: '15' })
   .option('--orientation <mode>', 'Orientation: portrait|landscape', { default: 'portrait' })
+  .option('--image-urls <urls>', 'Comma-separated image URLs to upload', { default: '' })
   .option('--manual-login', 'Pause for manual login if session missing', { default: false })
   .option('--profile <name>', 'Profile identifier (binds to a dedicated proxy)', { default: 'default' })
   .option('--login-only', 'Exit after ensuring the profile is logged in', { default: false })
@@ -92,10 +93,15 @@ cli
         return;
       }
 
+      const imageUrls = flags.imageUrls 
+        ? flags.imageUrls.split(',').map(url => url.trim()).filter(url => url.length > 0)
+        : undefined;
+
       const input: GenerationInput = {
         prompt: flags.prompt || 'test', // Default prompt if login-only mode
         durationSeconds: duration as 10 | 15,
-        orientation
+        orientation,
+        imageUrls
       };
 
       const result = await runGeneration({ page, baseUrl: runtimeConfig.SORA_BASE_URL, artifactsDir }, input);

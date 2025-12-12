@@ -18,7 +18,8 @@ export class WorkerRunner {
     prompt: string,
     duration: number,
     orientation: 'portrait' | 'landscape',
-    taskId?: string
+    taskId?: string,
+    imageUrls?: string[]
   ): Promise<WorkerResult> {
     const timeoutMs = runtimeConfig.TASK_TIMEOUT_MINUTES * 60 * 1000;
     const profileDir = resolve(runtimeConfig.PROFILE_ROOT);
@@ -44,6 +45,10 @@ export class WorkerRunner {
 
     if (taskId) {
       args.push('--task-id', taskId);
+    }
+
+    if (imageUrls && imageUrls.length > 0) {
+      args.push('--image-urls', imageUrls.join(','));
     }
 
     const env = {

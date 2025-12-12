@@ -4,6 +4,7 @@ export interface GenerationInput {
   prompt: string;
   durationSeconds: 10 | 15;
   orientation: VideoOrientation;
+  imageUrls?: string[];
 }
 
 export interface GenerationResult {

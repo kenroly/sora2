@@ -131,7 +131,8 @@ class Orchestrator {
       task.prompt,
       duration,
       orientation,
-      task.id
+      task.id,
+      task.image_urls
     );
 
     // Track active worker
