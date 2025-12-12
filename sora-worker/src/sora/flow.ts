@@ -25,6 +25,24 @@ async function capturePageState(page: Page, artifactsDir: string | undefined, la
   await writeFile(htmlPath, await page.content()).catch(() => undefined);
 }
 
+async function dismissWelcomePopup(page: Page, artifactsDir?: string): Promise<void> {
+  try {
+    // Look for the "Get started" button in the welcome popup
+    const getStartedButton = page.getByRole('button', { name: /get started/i }).first();
+    
+    if (await getStartedButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      logger.info('Welcome popup detected, clicking "Get started" to dismiss');
+      await getStartedButton.click();
+      await page.waitForTimeout(1_000); // Wait for popup to close
+      await capturePageState(page, artifactsDir, 'welcome-popup-dismissed');
+      logger.info('Welcome popup dismissed');
+    }
+  } catch (error) {
+    // If popup not found or error, continue - it's not critical
+    logger.debug({ error }, 'Welcome popup not found or already dismissed');
+  }
+}
+
 export async function ensureAuthenticated(
   page: Page,
   baseUrl: string,
@@ -33,6 +51,9 @@ export async function ensureAuthenticated(
   skipAuthCheck = false
 ): Promise<void> {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+
+  // Dismiss welcome popup if it appears
+  await dismissWelcomePopup(page, artifactsDir);
 
   if (skipAuthCheck) {
     logger.warn('Skipping login detection as requested (--skip-auth-check).');
@@ -114,6 +135,10 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
 
   const draftsUrl = new URL(DRAFTS_PATH, baseUrl).toString();
   await gotoWithRetry(page, draftsUrl, { waitUntil: 'domcontentloaded', timeout: 120_000, maxRetries: 3 });
+  
+  // Dismiss welcome popup if it appears after navigation
+  await dismissWelcomePopup(page, artifactsDir);
+  
   logger.info({ draftsUrl }, 'Opened drafts workspace');
   await capturePageState(page, artifactsDir, 'drafts-before-create');
 
