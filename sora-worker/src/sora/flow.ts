@@ -147,15 +147,28 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
     throw new Error(`Composer prompt not found: ${(error as Error).message}`);
   });
 
-  await applyComposerOptions(page, promptBox, input, artifactsDir);
+  // Wait a bit for composer to be fully ready
+  await page.waitForTimeout(1_000);
 
-  // Upload images if provided
+  // Upload images FIRST, before applying composer options
   if (input.imageUrls && input.imageUrls.length > 0) {
+    logger.info('Uploading images before setting composer options');
     await uploadImages(page, input.imageUrls, artifactsDir);
+    // Wait for image upload to complete
+    await page.waitForTimeout(2_000);
   }
 
+  // Then apply composer options (duration, orientation)
+  await applyComposerOptions(page, promptBox, input, artifactsDir);
+  
+  // Wait a bit after applying options
+  await page.waitForTimeout(1_000);
+
+  // Finally, fill in the prompt
   await promptBox.click();
+  await page.waitForTimeout(500);
   await promptBox.fill(input.prompt);
+  await page.waitForTimeout(500);
 
   const composerForm = promptBox.locator('xpath=ancestor::form[1]');
   let composerButton: Locator | null = null;
@@ -436,9 +449,15 @@ async function uploadImages(
 
       logger.info('Found Attach media button, clicking...');
       
+      // Wait a bit before clicking
+      await page.waitForTimeout(500);
+      
       // Click the button - this should trigger file picker or reveal file input
       await attachButton.click();
-      await page.waitForTimeout(1_000); // Wait for file input to be ready
+      logger.info('Clicked Attach media button, waiting for file input...');
+      
+      // Wait longer for file input to be ready
+      await page.waitForTimeout(2_000);
       
       // Find the file input - it might be hidden but still accessible
       // Try multiple selectors to find it
@@ -463,11 +482,14 @@ async function uploadImages(
             break;
           }
         }
+        // Wait a bit between tries
+        await page.waitForTimeout(300);
       }
       
       // If still not found, wait a bit more and try again
       if (!fileInputHandle) {
-        await page.waitForTimeout(1_000);
+        logger.info('File input not found yet, waiting longer...');
+        await page.waitForTimeout(2_000);
         const fileInput = page.locator('input[type="file"]').first();
         const count = await fileInput.count();
         if (count > 0) {
@@ -485,28 +507,37 @@ async function uploadImages(
       // Upload the file
       logger.info({ tempPath }, 'Uploading file via file input');
       await fileInputHandle.setInputFiles(tempPath);
-      await page.waitForTimeout(2_000); // Wait for upload to process
+      logger.info('File selected, waiting for upload to process...');
+      await page.waitForTimeout(3_000); // Wait longer for upload to process
       
       // Check if upload was successful by looking for image preview or uploaded indicator
+      // Wait a bit more for preview to appear
+      await page.waitForTimeout(2_000);
+      
       const imagePreview = page.locator('img[src*="blob"], img[src*="data:"], img[alt*="upload"], [class*="image"], [class*="preview"], [class*="upload"]').first();
       const hasImagePreview = await imagePreview.isVisible({ timeout: 5_000 }).catch(() => false);
       
       if (hasImagePreview) {
         uploadSuccess = true;
-        logger.info({ imageUrl }, 'Image uploaded successfully');
+        logger.info({ imageUrl }, 'Image uploaded successfully - preview visible');
         await capturePageState(page, artifactsDir, 'image-uploaded');
       } else {
         // Sometimes the image might be uploaded but preview takes time
         // Check if file input value changed (file was selected)
         const fileSelected = await fileInputHandle.evaluate((el: HTMLInputElement) => (el.files?.length ?? 0) > 0).catch(() => false);
         if (fileSelected) {
-          logger.info('File was selected, assuming upload in progress');
+          logger.info('File was selected in input, assuming upload successful');
           uploadSuccess = true;
           await capturePageState(page, artifactsDir, 'image-uploaded');
         } else {
           logger.warn('File input shows no file selected');
           await capturePageState(page, artifactsDir, 'image-upload-no-preview');
         }
+      }
+      
+      // Additional wait after upload to ensure it's processed
+      if (uploadSuccess) {
+        await page.waitForTimeout(1_000);
       }
       
     } catch (error) {
@@ -544,7 +575,10 @@ async function applyComposerOptions(
     return;
   }
 
+  await page.waitForTimeout(500); // Wait before opening settings
+  
   let rootMenu = await openSettingsMenu(page, settingsButton);
+  await page.waitForTimeout(500); // Wait after menu opens
 
   const durationPatterns = [
     new RegExp(`${input.durationSeconds}\\s*s`, 'i'),
@@ -563,16 +597,21 @@ async function applyComposerOptions(
 
   if (durationSelected) {
     await capturePageState(page, artifactsDir, 'composer-duration-selected');
+    await page.waitForTimeout(500);
     await promptBox.focus().catch(() => undefined);
   }
 
+  await page.waitForTimeout(500);
   await page.keyboard.press('Escape').catch(() => undefined); // Close after duration
+  await page.waitForTimeout(500);
 
   if (!durationSelected) {
     logger.warn({ duration: input.durationSeconds }, 'Duration option not found; leaving default');
   }
 
+  await page.waitForTimeout(500); // Wait before opening settings again
   rootMenu = await openSettingsMenu(page, settingsButton);
+  await page.waitForTimeout(500); // Wait after menu opens
 
   const orientationPatterns = input.orientation === 'portrait' ? [/portrait/i] : [/landscape/i];
   const orientationSelected = await selectFromSubmenu(
@@ -585,6 +624,7 @@ async function applyComposerOptions(
 
   if (orientationSelected) {
     await capturePageState(page, artifactsDir, 'composer-orientation-selected');
+    await page.waitForTimeout(500);
     await promptBox.focus().catch(() => undefined);
   }
 
@@ -592,12 +632,14 @@ async function applyComposerOptions(
     logger.warn({ orientation: input.orientation }, 'Orientation option not found; leaving default');
   }
 
+  await page.waitForTimeout(500);
   await page.keyboard.press('Escape').catch(() => undefined); // Close after orientation
+  await page.waitForTimeout(500);
 }
 
 async function openSettingsMenu(page: Page, settingsButton: Locator): Promise<Locator> {
   await settingsButton.click();
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(800); // Longer wait for menu to appear
   return page.locator('[role="menu"]').last();
 }
 
@@ -618,7 +660,7 @@ async function selectFromSubmenu(
   const beforeCount = await menus.count();
 
   await trigger.click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(500); // Longer wait for submenu to appear
 
   const afterCount = await menus.count();
   const submenuIndex = Math.max(afterCount - 1, 0);
@@ -643,8 +685,9 @@ async function selectMenuItemInMenu(
         .catch(() => false);
       if (enabled) {
         await menuItem.focus().catch(() => undefined);
+        await page.waitForTimeout(300);
         await page.keyboard.press('Enter');
-        await page.waitForTimeout(200);
+        await page.waitForTimeout(500);
         logger.info({ label, pattern: pattern.toString(), role: 'menuitem' }, 'Composer option updated');
         return true;
       } else {
@@ -658,8 +701,9 @@ async function selectMenuItemInMenu(
         .catch(() => false);
       if (enabled) {
         await radioItem.focus().catch(() => undefined);
+        await page.waitForTimeout(300);
         await page.keyboard.press('Enter');
-        await page.waitForTimeout(200);
+        await page.waitForTimeout(500);
         logger.info({ label, pattern: pattern.toString(), role: 'menuitemradio' }, 'Composer option updated');
         return true;
       } else {
