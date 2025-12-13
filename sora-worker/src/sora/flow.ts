@@ -416,48 +416,116 @@ async function uploadImages(
       logger.info('Clicking Attach media button to upload image');
       
       // Find and click the "Attach media" button
-      // Use SVG icon path instead of text to avoid language issues
-      // The button has an SVG with plus icon path: "M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"
-      let attachButton = page.locator('button:has(svg path[d*="M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"])').first();
+      // Try multiple methods to find the button
+      let attachButton: Locator | null = null;
       
-      // Fallback: find button with plus icon (shorter path pattern)
-      if (await attachButton.count() === 0) {
-        attachButton = page.locator('button:has(svg path[d*="M12 6"])').first();
+      // Method 1: Find by SVG icon path (plus icon)
+      const buttonBySvg = page.locator('button:has(svg path[d*="M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"])').first();
+      if (await buttonBySvg.count() > 0 && await buttonBySvg.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        attachButton = buttonBySvg;
+        logger.info('Found Attach media button by SVG icon');
       }
       
-      // Another fallback: find button near textarea with plus icon
-      if (await attachButton.count() === 0) {
-        const promptBox = page.getByPlaceholder('Describe your video...').first();
-        if (await promptBox.isVisible().catch(() => false)) {
-          // Find button in the same container as textarea that has plus icon SVG
-          const composerContainer = promptBox.locator('xpath=ancestor::div[contains(@class, "composer") or contains(@class, "popover")]').first();
-          attachButton = composerContainer.locator('button:has(svg path[d*="M12"])').first();
+      // Method 2: Find by aria-label in sr-only span
+      if (!attachButton) {
+        const buttonByAria = page.locator('button:has(span.sr-only:has-text("Attach media"))').first();
+        if (await buttonByAria.count() > 0 && await buttonByAria.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          attachButton = buttonByAria;
+          logger.info('Found Attach media button by aria-label');
         }
       }
       
-      if (await attachButton.count() === 0) {
-        logger.warn('Attach media button not found by SVG icon');
+      // Method 3: Find button near textarea with plus icon
+      if (!attachButton) {
+        const promptBox = page.getByPlaceholder('Describe your video...').first();
+        if (await promptBox.isVisible().catch(() => false)) {
+          // Find button in the same container as textarea
+          const composerContainer = promptBox.locator('xpath=ancestor::div[contains(@class, "composer") or contains(@class, "popover")]').first();
+          const buttonInComposer = composerContainer.locator('button:has(svg path[d*="M12"])').first();
+          if (await buttonInComposer.count() > 0 && await buttonInComposer.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            attachButton = buttonInComposer;
+            logger.info('Found Attach media button in composer container');
+          }
+        }
+      }
+      
+      // Method 4: Find button with plus icon in flex-wrap container
+      if (!attachButton) {
+        const flexWrapContainer = page.locator('div.flex.flex-wrap.gap-1\\.5').first();
+        if (await flexWrapContainer.isVisible().catch(() => false)) {
+          const buttonInFlex = flexWrapContainer.locator('button:has(svg path[d*="M12"])').first();
+          if (await buttonInFlex.count() > 0 && await buttonInFlex.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            attachButton = buttonInFlex;
+            logger.info('Found Attach media button in flex-wrap container');
+          }
+        }
+      }
+      
+      if (!attachButton) {
+        logger.warn('Attach media button not found by any method');
         await capturePageState(page, artifactsDir, 'attach-button-not-found');
         return;
       }
       
-      if (!(await attachButton.isVisible({ timeout: 10_000 }).catch(() => false))) {
-        logger.warn('Attach media button found but not visible');
-        await capturePageState(page, artifactsDir, 'attach-button-not-visible');
-        return;
-      }
-
       logger.info('Found Attach media button, clicking...');
       
       // Wait a bit before clicking
       await page.waitForTimeout(500);
       
-      // Click the button - this should trigger file picker or reveal file input
+      // Click the button - this should trigger file picker or reveal file input or show agreement dialog
       await attachButton.click();
-      logger.info('Clicked Attach media button, waiting for file input...');
+      logger.info('Clicked Attach media button, waiting for response...');
       
-      // Wait longer for file input to be ready
-      await page.waitForTimeout(2_000);
+      // Wait and check if agreement dialog appears
+      await page.waitForTimeout(1_500);
+      
+      // Check for "Media upload agreement" dialog
+      const agreementDialog = page.locator('div[role="dialog"]:has-text("Media upload agreement"), div[role="dialog"]:has-text("agreement")').first();
+      const hasDialog = await agreementDialog.isVisible({ timeout: 3_000 }).catch(() => false);
+      
+      if (hasDialog) {
+        logger.info('Media upload agreement dialog detected, accepting terms...');
+        
+        // Find all checkboxes in the dialog
+        const checkboxes = agreementDialog.locator('button[role="checkbox"]').all();
+        const checkboxList = await checkboxes;
+        
+        logger.info({ checkboxCount: checkboxList.length }, 'Found checkboxes in agreement dialog');
+        
+        // Tick all checkboxes
+        for (let i = 0; i < checkboxList.length; i++) {
+          const checkbox = checkboxList[i];
+          const isChecked = await checkbox.getAttribute('aria-checked').catch(() => 'false');
+          if (isChecked !== 'true') {
+            logger.info({ index: i + 1 }, 'Clicking checkbox to accept term');
+            await checkbox.click();
+            await page.waitForTimeout(300);
+          }
+        }
+        
+        // Wait a bit for Accept button to become enabled
+        await page.waitForTimeout(500);
+        
+        // Find and click Accept button
+        const acceptButton = agreementDialog.locator('button:has-text("Accept"), button:has-text("accept")').first();
+        if (await acceptButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          const isDisabled = await acceptButton.getAttribute('data-disabled').catch(() => 'true');
+          if (isDisabled !== 'true') {
+            logger.info('Clicking Accept button');
+            await acceptButton.click();
+            await page.waitForTimeout(1_000);
+          } else {
+            logger.warn('Accept button is disabled, trying to click anyway');
+            await acceptButton.click({ force: true });
+            await page.waitForTimeout(1_000);
+          }
+        } else {
+          logger.warn('Accept button not found in dialog');
+        }
+      }
+      
+      // Wait for file input to be ready (after dialog closes if it appeared)
+      await page.waitForTimeout(1_500);
       
       // Find the file input - it might be hidden but still accessible
       // Try multiple selectors to find it

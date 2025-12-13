@@ -71,7 +71,15 @@ export class WorkerRunner {
     env.MONITOR_CAPTURE_INTERVAL_MS = String(runtimeConfig.MONITOR_CAPTURE_INTERVAL_MS ?? 1000);
 
     logger.info(
-      { profile: profile.name, prompt, duration, orientation, workerEntry },
+      { 
+        profile: profile.name, 
+        prompt, 
+        duration, 
+        orientation, 
+        workerEntry,
+        imageUrls: imageUrls,
+        hasImages: !!(imageUrls && imageUrls.length > 0)
+      },
       'Starting worker process'
     );
 

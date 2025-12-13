@@ -103,7 +103,12 @@ class Orchestrator {
     // Save task to database
     await this.taskStore.saveTask(task, runtimeConfig.PRODUCT_CODE);
 
-    logger.info({ taskId: task.id, prompt: task.prompt, profile: profile.name }, 'Processing task');
+    logger.info({ 
+      taskId: task.id, 
+      prompt: task.prompt, 
+      profile: profile.name,
+      imageUrls: task.image_urls 
+    }, 'Processing task');
 
     // Update task with profile
     await this.taskStore.updateTaskStatus(task.id, 'processing', {
@@ -121,7 +126,14 @@ class Orchestrator {
     );
 
     logger.info(
-      { taskId: task.id, profile: profile.name, duration, orientation },
+      { 
+        taskId: task.id, 
+        profile: profile.name, 
+        duration, 
+        orientation,
+        imageUrls: task.image_urls,
+        hasImages: !!(task.image_urls && task.image_urls.length > 0)
+      },
       'Starting worker'
     );
 

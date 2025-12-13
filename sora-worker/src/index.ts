@@ -97,12 +97,26 @@ cli
         ? flags.imageUrls.split(',').map((url: string) => url.trim()).filter((url: string) => url.length > 0)
         : undefined;
 
+      if (imageUrls && imageUrls.length > 0) {
+        logger.info({ imageUrls, count: imageUrls.length }, 'Image URLs received from orchestrator');
+      } else {
+        logger.info('No image URLs provided');
+      }
+
       const input: GenerationInput = {
         prompt: flags.prompt || 'test', // Default prompt if login-only mode
         durationSeconds: duration as 10 | 15,
         orientation,
         imageUrls
       };
+      
+      logger.info({ 
+        prompt: input.prompt.substring(0, 50) + '...', 
+        duration: input.durationSeconds, 
+        orientation: input.orientation,
+        hasImages: !!(input.imageUrls && input.imageUrls.length > 0),
+        imageCount: input.imageUrls?.length ?? 0
+      }, 'Generation input prepared');
 
       const result = await runGeneration({ page, baseUrl: runtimeConfig.SORA_BASE_URL, artifactsDir }, input);
       
