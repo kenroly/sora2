@@ -25,7 +25,7 @@ async function capturePageState(page: Page, artifactsDir: string | undefined, la
   await writeFile(htmlPath, await page.content()).catch(() => undefined);
 }
 
-async function dismissWelcomePopup(page: Page, artifactsDir?: string): Promise<void> {
+export async function dismissWelcomePopup(page: Page, artifactsDir?: string): Promise<void> {
   try {
     // Look for the "Get started" button in the welcome popup
     const getStartedButton = page.getByRole('button', { name: /get started/i }).first();
@@ -160,7 +160,7 @@ export async function runGeneration(options: FlowOptions, input: GenerationInput
 
   // Then apply composer options (duration, orientation)
   await applyComposerOptions(page, promptBox, input, artifactsDir);
-  
+
   // Wait a bit after applying options
   await page.waitForTimeout(1_000);
 
@@ -416,47 +416,49 @@ async function uploadImages(
       logger.info('Clicking Attach media button to upload image');
       
       // Find and click the "Attach media" button
-      // Try multiple methods to find the button
+      // Based on actual HTML structure: button with span.sr-only containing "Attach media"
+      // The button is in a div.flex.flex-wrap.gap-1.5 container
       let attachButton: Locator | null = null;
       
-      // Method 1: Find by SVG icon path (plus icon)
-      const buttonBySvg = page.locator('button:has(svg path[d*="M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"])').first();
-      if (await buttonBySvg.count() > 0 && await buttonBySvg.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        attachButton = buttonBySvg;
-        logger.info('Found Attach media button by SVG icon');
+      // Method 1: Find by span.sr-only with "Attach media" text (most reliable)
+      const buttonBySrOnly = page.locator('button:has(span.sr-only:has-text("Attach media"))').first();
+      if (await buttonBySrOnly.count() > 0 && await buttonBySrOnly.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        attachButton = buttonBySrOnly;
+        logger.info('Found Attach media button by sr-only span');
       }
       
-      // Method 2: Find by aria-label in sr-only span
+      // Method 2: Find in flex-wrap container by SVG icon
       if (!attachButton) {
-        const buttonByAria = page.locator('button:has(span.sr-only:has-text("Attach media"))').first();
-        if (await buttonByAria.count() > 0 && await buttonByAria.isVisible({ timeout: 2_000 }).catch(() => false)) {
-          attachButton = buttonByAria;
-          logger.info('Found Attach media button by aria-label');
+        const flexWrapContainer = page.locator('div.flex.flex-wrap').first();
+        if (await flexWrapContainer.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          // Find button with plus icon SVG in the flex-wrap container
+          const buttonInFlex = flexWrapContainer.locator('button:has(svg path[d*="M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"])').first();
+          if (await buttonInFlex.count() > 0 && await buttonInFlex.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            attachButton = buttonInFlex;
+            logger.info('Found Attach media button in flex-wrap container by SVG');
+          }
         }
       }
       
-      // Method 3: Find button near textarea with plus icon
+      // Method 3: Find by SVG icon path (shorter pattern)
+      if (!attachButton) {
+        const buttonBySvg = page.locator('button:has(svg path[d*="M12 6a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H7a1 1 0 1 1 0-2h4V7a1 1 0 0 1 1-1"])').first();
+        if (await buttonBySvg.count() > 0 && await buttonBySvg.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          attachButton = buttonBySvg;
+          logger.info('Found Attach media button by SVG icon path');
+        }
+      }
+      
+      // Method 4: Find button near textarea
       if (!attachButton) {
         const promptBox = page.getByPlaceholder('Describe your video...').first();
         if (await promptBox.isVisible().catch(() => false)) {
           // Find button in the same container as textarea
           const composerContainer = promptBox.locator('xpath=ancestor::div[contains(@class, "composer") or contains(@class, "popover")]').first();
-          const buttonInComposer = composerContainer.locator('button:has(svg path[d*="M12"])').first();
+          const buttonInComposer = composerContainer.locator('button:has(span.sr-only:has-text("Attach media"))').first();
           if (await buttonInComposer.count() > 0 && await buttonInComposer.isVisible({ timeout: 2_000 }).catch(() => false)) {
             attachButton = buttonInComposer;
             logger.info('Found Attach media button in composer container');
-          }
-        }
-      }
-      
-      // Method 4: Find button with plus icon in flex-wrap container
-      if (!attachButton) {
-        const flexWrapContainer = page.locator('div.flex.flex-wrap.gap-1\\.5').first();
-        if (await flexWrapContainer.isVisible().catch(() => false)) {
-          const buttonInFlex = flexWrapContainer.locator('button:has(svg path[d*="M12"])').first();
-          if (await buttonInFlex.count() > 0 && await buttonInFlex.isVisible({ timeout: 2_000 }).catch(() => false)) {
-            attachButton = buttonInFlex;
-            logger.info('Found Attach media button in flex-wrap container');
           }
         }
       }
@@ -467,17 +469,31 @@ async function uploadImages(
         return;
       }
       
-      logger.info('Found Attach media button, clicking...');
+      logger.info('Found Attach media button, attempting to trigger file input...');
       
-      // Wait a bit before clicking
+      // Wait a bit before interacting
       await page.waitForTimeout(500);
+      
+      // Set up file chooser handler - this is the proper way to handle file uploads in Playwright
+      let fileChooserHandled = false;
+      const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 5_000 }).catch(() => null);
       
       // Click the button - this should trigger file picker or reveal file input or show agreement dialog
       await attachButton.click();
-      logger.info('Clicked Attach media button, waiting for response...');
+      logger.info('Clicked Attach media button, waiting for file chooser or dialog...');
       
-      // Wait and check if agreement dialog appears
-      await page.waitForTimeout(1_500);
+      // Wait for file chooser or check for agreement dialog
+      const fileChooser = await fileChooserPromise;
+      if (fileChooser) {
+        logger.info('File chooser dialog appeared, setting file...');
+        await fileChooser.setFiles(tempPath);
+        fileChooserHandled = true;
+        logger.info('File set via file chooser');
+        await page.waitForTimeout(2_000);
+      } else {
+        logger.info('No file chooser appeared, checking for agreement dialog...');
+        await page.waitForTimeout(1_500);
+      }
       
       // Check for "Media upload agreement" dialog
       const agreementDialog = page.locator('div[role="dialog"]:has-text("Media upload agreement"), div[role="dialog"]:has-text("agreement")').first();
@@ -524,58 +540,120 @@ async function uploadImages(
         }
       }
       
-      // Wait for file input to be ready (after dialog closes if it appeared)
-      await page.waitForTimeout(1_500);
-      
-      // Find the file input - it might be hidden but still accessible
-      // Try multiple selectors to find it
-      let fileInputHandle: Locator | null = null;
-      
-      // Try different selectors for file input
-      const fileInputSelectors = [
-        'input[type="file"][accept*="image"]',
-        'input[type="file"]',
-        'input[accept*="jpeg"], input[accept*="png"], input[accept*="webp"]'
-      ];
-      
-      for (const selector of fileInputSelectors) {
-        const fileInput = page.locator(selector).first();
-        const count = await fileInput.count();
-        if (count > 0) {
-          // Check if it's actually in the DOM (even if hidden)
-          const isConnected = await fileInput.evaluate((el: HTMLInputElement) => el.isConnected).catch(() => false);
-          if (isConnected) {
-            fileInputHandle = fileInput;
-            logger.info({ selector }, 'Found file input');
-            break;
+      // If file chooser was handled, skip direct file input setting
+      if (fileChooserHandled) {
+        logger.info('File was set via file chooser, skipping direct input setting');
+        // Still check for image preview below
+      } else {
+        // After resolving dialog (or if no dialog appeared), file input should be ready
+        // Wait a bit for dialog to fully close and file input to be accessible
+        await page.waitForTimeout(2_000);
+        
+        // If dialog was shown, we might need to click button again to activate file input
+        if (hasDialog) {
+          logger.info('Dialog was shown, clicking attach button again to activate file input...');
+          await attachButton.click();
+          await page.waitForTimeout(1_000);
+        }
+        
+        // Find all file inputs and try to set file on each one
+        const allFileInputs = await page.locator('input[type="file"]').all();
+        logger.info({ fileInputCount: allFileInputs.length }, 'Found file inputs');
+        
+        if (allFileInputs.length === 0) {
+          logger.warn('No file inputs found');
+          await capturePageState(page, artifactsDir, 'file-input-not-found');
+          return;
+        }
+        
+        // Try to set file on each input
+        let fileSet = false;
+        let fileInputHandle: Locator | null = null;
+        
+        for (let i = 0; i < allFileInputs.length; i++) {
+          try {
+            const input = allFileInputs[i];
+            const accept = await input.getAttribute('accept').catch(() => '');
+            logger.info({ index: i, accept }, 'Trying to set file on input');
+            
+            // Remove hidden class temporarily to make input accessible
+            await input.evaluate((el: HTMLInputElement) => {
+              el.classList.remove('hidden');
+              el.style.display = 'block';
+              el.style.visibility = 'visible';
+              el.style.opacity = '1';
+            });
+            
+            await page.waitForTimeout(200);
+            
+            // Try clicking the input first to "activate" it
+            try {
+              await input.click({ force: true });
+              await page.waitForTimeout(300);
+            } catch (error) {
+              logger.debug({ index: i, error }, 'Could not click input, continuing anyway');
+            }
+            
+            await input.setInputFiles(tempPath);
+            
+            // Restore hidden class
+            await input.evaluate((el: HTMLInputElement) => {
+              el.classList.add('hidden');
+              el.style.display = '';
+              el.style.visibility = '';
+              el.style.opacity = '';
+            });
+            
+            // Verify file was set
+            const fileInfo = await input.evaluate((el: HTMLInputElement) => {
+              const files = el.files;
+              if (files && files.length > 0) {
+                return {
+                  fileCount: files.length,
+                  fileName: files[0].name,
+                  fileSize: files[0].size
+                };
+              }
+              return { fileCount: 0 };
+            });
+            
+            logger.info({ index: i, fileInfo }, 'File input verification after set');
+            
+            if (fileInfo.fileCount > 0) {
+              fileInputHandle = input;
+              fileSet = true;
+              logger.info({ index: i }, 'File successfully set on this input');
+              break;
+            }
+          } catch (error) {
+            logger.warn({ index: i, error }, 'Failed to set file on this input');
           }
         }
-        // Wait a bit between tries
-        await page.waitForTimeout(300);
-      }
-      
-      // If still not found, wait a bit more and try again
-      if (!fileInputHandle) {
-        logger.info('File input not found yet, waiting longer...');
-        await page.waitForTimeout(2_000);
-        const fileInput = page.locator('input[type="file"]').first();
-        const count = await fileInput.count();
-        if (count > 0) {
-          fileInputHandle = fileInput;
-          logger.info('Found file input after additional wait');
+        
+        if (!fileSet) {
+          logger.warn('Failed to set file on any input');
+          await capturePageState(page, artifactsDir, 'file-set-failed');
+          return;
+        }
+        
+        logger.info('File set via setInputFiles');
+        
+        // Trigger change and input events
+        if (fileInputHandle) {
+          try {
+            await fileInputHandle.evaluate((el: HTMLInputElement) => {
+              const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+              el.dispatchEvent(changeEvent);
+              const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+              el.dispatchEvent(inputEvent);
+            });
+            logger.info('Triggered change and input events');
+          } catch (error) {
+            logger.warn({ error }, 'Failed to trigger events');
+          }
         }
       }
-
-      if (!fileInputHandle) {
-        logger.warn('File input not found after clicking Attach media button');
-        await capturePageState(page, artifactsDir, 'file-input-not-found');
-        return;
-      }
-
-      // Upload the file
-      logger.info({ tempPath }, 'Uploading file via file input');
-      await fileInputHandle.setInputFiles(tempPath);
-      logger.info('File selected, waiting for upload to process...');
+      
       await page.waitForTimeout(3_000); // Wait longer for upload to process
       
       // Check if upload was successful by looking for image preview or uploaded indicator
@@ -591,15 +669,23 @@ async function uploadImages(
         await capturePageState(page, artifactsDir, 'image-uploaded');
       } else {
         // Sometimes the image might be uploaded but preview takes time
-        // Check if file input value changed (file was selected)
-        const fileSelected = await fileInputHandle.evaluate((el: HTMLInputElement) => (el.files?.length ?? 0) > 0).catch(() => false);
-        if (fileSelected) {
-          logger.info('File was selected in input, assuming upload successful');
+        // If file chooser was handled, assume upload is successful
+        if (fileChooserHandled) {
+          logger.info('File was set via file chooser, assuming upload successful');
           uploadSuccess = true;
           await capturePageState(page, artifactsDir, 'image-uploaded');
         } else {
-          logger.warn('File input shows no file selected');
-          await capturePageState(page, artifactsDir, 'image-upload-no-preview');
+          // Check if file input value changed (file was selected)
+          const fileInput = page.locator('input[type="file"]').first();
+          const fileSelected = await fileInput.evaluate((el: HTMLInputElement) => (el.files?.length ?? 0) > 0).catch(() => false);
+          if (fileSelected) {
+            logger.info('File was selected in input, assuming upload successful');
+            uploadSuccess = true;
+            await capturePageState(page, artifactsDir, 'image-uploaded');
+          } else {
+            logger.warn('File input shows no file selected');
+            await capturePageState(page, artifactsDir, 'image-upload-no-preview');
+          }
         }
       }
       
@@ -644,7 +730,7 @@ async function applyComposerOptions(
   }
 
   await page.waitForTimeout(500); // Wait before opening settings
-  
+
   let rootMenu = await openSettingsMenu(page, settingsButton);
   await page.waitForTimeout(500); // Wait after menu opens
 
