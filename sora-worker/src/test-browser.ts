@@ -16,7 +16,7 @@ async function main() {
   
   // Try to load from MongoDB, but fallback to direct path if MongoDB fails
   let userDataDir: string;
-  let proxy: string | undefined;
+  let proxy: string;
   let fingerprint: string | null = null;
   
   try {
@@ -30,7 +30,7 @@ async function main() {
     await profileStore.connect();
     const profile = await profileStore.ensureProfile(profileName);
     userDataDir = profile.userDataDir;
-    proxy = profile.proxy;
+    proxy = profile.proxy || '';
     fingerprint = profile.fingerprint;
 
     logger.info({ 
@@ -45,7 +45,7 @@ async function main() {
     // Fallback: use direct path
     const { resolve } = await import('node:path');
     userDataDir = resolve(runtimeConfig.PROFILE_ROOT, profileName);
-    proxy = undefined;
+    proxy = '';
     logger.info({ userDataDir }, 'Using direct profile path');
   }
 

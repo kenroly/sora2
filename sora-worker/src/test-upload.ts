@@ -10,7 +10,7 @@ import { ensureAuthenticated, dismissWelcomePopup } from './sora/flow.js';
 import { logger } from './logger.js';
 import { MongoProfileStore } from './storage/mongoProfileStore.js';
 import { runtimeConfig } from './config.js';
-import type { Page } from '@playwright/test';
+import type { Page, Locator } from '@playwright/test';
 
 async function uploadImageFile(page: Page, imagePath: string, artifactsDir: string): Promise<void> {
   logger.info({ imagePath }, 'Starting image upload test');
@@ -107,6 +107,7 @@ async function uploadImageFile(page: Page, imagePath: string, artifactsDir: stri
     
     // Try to set file on each input
     let fileSet = false;
+    let fileInputHandle: Locator | null = null;
   for (let i = 0; i < allFileInputs.length; i++) {
     try {
       const input = allFileInputs[i];
@@ -172,39 +173,42 @@ async function uploadImageFile(page: Page, imagePath: string, artifactsDir: stri
       await page.screenshot({ path: join(artifactsDir, 'file-set-failed.png'), fullPage: true });
       throw new Error('Failed to set file');
     }
-  }
-  logger.info('File set via setInputFiles');
-  
-  // Verify file was set
-  try {
-    const fileInfo = await fileInputHandle.evaluate((el: HTMLInputElement) => {
-      const files = el.files;
-      if (files && files.length > 0) {
-        return {
-          fileCount: files.length,
-          fileName: files[0].name,
-          fileSize: files[0].size,
-          fileType: files[0].type
-        };
+    
+    logger.info('File set via setInputFiles');
+    
+    // Verify file was set
+    if (fileInputHandle) {
+      try {
+        const fileInfo = await fileInputHandle.evaluate((el: HTMLInputElement) => {
+          const files = el.files;
+          if (files && files.length > 0) {
+            return {
+              fileCount: files.length,
+              fileName: files[0].name,
+              fileSize: files[0].size,
+              fileType: files[0].type
+            };
+          }
+          return { fileCount: 0 };
+        });
+        logger.info({ fileInfo }, 'File input verification');
+      } catch (error) {
+        logger.warn({ error }, 'Failed to verify file input');
       }
-      return { fileCount: 0 };
-    });
-    logger.info({ fileInfo }, 'File input verification');
-  } catch (error) {
-    logger.warn({ error }, 'Failed to verify file input');
-  }
-  
-  // Trigger change and input events
-  try {
-    await fileInputHandle.evaluate((el: HTMLInputElement) => {
-      const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-      el.dispatchEvent(changeEvent);
-      const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-      el.dispatchEvent(inputEvent);
-    });
-    logger.info('Triggered change and input events');
-  } catch (error) {
-    logger.warn({ error }, 'Failed to trigger events');
+      
+      // Trigger change and input events
+      try {
+        await fileInputHandle.evaluate((el: HTMLInputElement) => {
+          const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+          el.dispatchEvent(changeEvent);
+          const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+          el.dispatchEvent(inputEvent);
+        });
+        logger.info('Triggered change and input events');
+      } catch (error) {
+        logger.warn({ error }, 'Failed to trigger events');
+      }
+    }
   }
   
   // Wait for upload to process
@@ -238,7 +242,7 @@ async function main() {
   
   // Try to load from MongoDB
   let userDataDir: string;
-  let proxy: string | undefined;
+  let proxy: string;
   let fingerprint: string | null = null;
   
   try {
@@ -252,7 +256,7 @@ async function main() {
     await profileStore.connect();
     const profile = await profileStore.ensureProfile(profileName);
     userDataDir = profile.userDataDir;
-    proxy = profile.proxy;
+    proxy = profile.proxy || '';
     fingerprint = profile.fingerprint;
 
     logger.info({ 
@@ -265,7 +269,7 @@ async function main() {
   } catch (error) {
     logger.warn({ error }, 'Failed to load from MongoDB, using direct path');
     userDataDir = resolve(runtimeConfig.PROFILE_ROOT, profileName);
-    proxy = undefined;
+    proxy = '';
     logger.info({ userDataDir }, 'Using direct profile path');
   }
 
